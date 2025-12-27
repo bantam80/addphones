@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Retry Fix</title>
+    <title>Quote Kiosk - Data Focus</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -11,32 +11,39 @@
         input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
         button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
         
-        #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; }
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
         .result-item:hover { background-color: #f0f0f0; }
         
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
-        .footer { margin-top: 30px; text-align: right; }
-
-        #successScreen { display: none; text-align: center; margin-top: 50px; }
-        #successScreen h3 { font-size: 24px; color: #28a745; margin-bottom: 10px; }
         
-        #debugLog { display: block; margin-top: 20px; padding: 10px; background: #ffe6e6; border: 1px solid red; color: #d8000c; font-family: monospace; font-size: 12px; white-space: pre-wrap; height: 150px; overflow-y: scroll;}
+        /* Manual ID Box - The "Fail Safe" */
+        #manualIdArea { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; margin-bottom: 20px; display:none; }
+        .status-ok { color: green; font-weight: bold; }
+        .status-err { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
 
-<div id="mainInterface" class="kiosk-container">
-    <h2>Select Hardware R2</h2>
+<div class="kiosk-container">
+    <h2>Add Hardware to Deal</h2>
+
+    <div id="statusArea">Initializing...</div>
+
+    <div id="manualIdArea">
+        <strong>⚠️ Auto-Detect Failed</strong><br>
+        <span style="font-size:12px; color:#666;">This happens when testing outside the standard context. Paste Deal ID below to proceed.</span><br><br>
+        <input type="text" id="manualIdInput" placeholder="Paste Deal ID here (e.g. 56987...)">
+        <button onclick="setManualId()" style="background:#e0a800; padding:10px;">Set ID</button>
+    </div>
     
-    <input type="text" id="searchBox" placeholder="Initializing..." 
+    <input type="text" id="searchBox" placeholder="Loading Products..." 
            onfocus="showAllProducts()" 
-           onkeyup="filterLocalProducts()">
-           
+           onkeyup="filterLocalProducts()">  
     <div id="results"></div>
 
-    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px; border-radius:8px;">
+    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px;">
         <h3 id="selectedName" style="margin-top:0;"></h3>
         <label>Quantity:</label>
         <input type="number" id="qtyInput" value="1" min="1" style="width:100px; display:inline-block; margin-right:10px;">
@@ -55,17 +62,9 @@
         <tbody id="cartBody"></tbody>
     </table>
 
-    <div class="footer">
-        <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Loading Deal ID...</button>
+    <div style="margin-top: 30px; text-align: right;">
+        <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Waiting for ID...</button>
     </div>
-
-    <div id="debugLog">Initializing...</div>
-</div>
-
-<div id="successScreen">
-    <h3>Success!</h3>
-    <p>Hardware saved.</p>
-    <p>Processing Blueprint...</p>
 </div>
 
 <script>
@@ -73,94 +72,48 @@
     let masterProductList = []; 
     let selectedProduct = null;
     let dealId = "";
-    let retryCount = 0;
 
-    function log(msg) {
-        let box = document.getElementById("debugLog");
-        if(box) {
-            let d = new Date();
-            let time = d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
-            box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
-        }
-        console.log(msg);
-    }
-
-    // --- STARTUP ---
+    // 1. INITIALIZE
     ZOHO.embeddedApp.init().then(function(){
-        log("SDK Init Success.");
-
-        // 1. Fetch Products Immediately
+        document.getElementById("statusArea").innerHTML = "SDK Ready. Looking for ID...";
+        
+        // Fetch Products Immediately
         fetchTargetProducts();
 
-        // 2. Listen for PageLoad (Standard)
+        // Listen for ID
         ZOHO.embeddedApp.on("PageLoad", function(data){
-            if(data) handleDealId(data, "PageLoad");
+            if(data && data.EntityId) {
+                let id = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+                setDealId(id, "Auto-Detected");
+            }
         });
 
-        // 3. Try Blueprint Context (With Retry Logic)
-        attemptBlueprintFetch();
-
-    }).catch(function(e){
-        // This catches errors in the INIT chain
-        log("CRITICAL SDK ERROR: " + JSON.stringify(e));
+        // If no ID found after 2 seconds, show manual box
+        setTimeout(function(){
+            if(!dealId) document.getElementById("manualIdArea").style.display = "block";
+        }, 2000);
     });
 
-    // --- BLUEPRINT RETRY SYSTEM ---
-    function attemptBlueprintFetch() {
-        if(dealId) return; // Stop if we already have it
-
-        log(`Attempting Blueprint Context (Try ${retryCount + 1})...`);
+    function setDealId(id, source) {
+        dealId = id;
+        let msg = "✅ Connected to Deal: " + dealId + " (" + source + ")";
+        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>${msg}</span>`;
+        document.getElementById("manualIdArea").style.display = "none";
         
-        ZOHO.CRM.BLUEPRINT.contexts()
-        .then(function(bpData){
-            if(bpData) {
-                handleDealId(bpData, "Blueprint");
-            } else {
-                handleRetry();
-            }
-        })
-        .catch(function(err){
-            log("Blueprint Context Failed: " + JSON.stringify(err));
-            handleRetry();
-        });
+        let btn = document.getElementById("submitBtn");
+        btn.disabled = false;
+        btn.style.background = "#28a745";
+        btn.innerText = "Save to Opportunity";
     }
 
-    function handleRetry() {
-        if(dealId) return;
-        
-        retryCount++;
-        if(retryCount < 3) {
-            log("Context not ready. Retrying in 1.5s...");
-            setTimeout(attemptBlueprintFetch, 1500);
-        } else {
-            log("GAVE UP: Could not find Deal ID automatically.");
-            document.getElementById("submitBtn").innerText = "Error: Refresh Page";
-        }
+    function setManualId() {
+        let val = document.getElementById("manualIdInput").value.trim();
+        if(val.length > 5) setDealId(val, "Manual");
+        else alert("Invalid ID");
     }
 
-    // --- CENTRAL ID HANDLER ---
-    function handleDealId(data, source) {
-        if(dealId) return; 
-
-        let foundId = "";
-        if(data.EntityId) foundId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
-        else if(data.id) foundId = data.id;
-        else if(data.Record && data.Record.id) foundId = data.Record.id;
-
-        if(foundId) {
-            dealId = foundId;
-            log("SUCCESS: Deal ID found via " + source + ": " + dealId);
-            let btn = document.getElementById("submitBtn");
-            btn.disabled = false;
-            btn.style.background = "#28a745"; 
-            btn.innerText = "Complete Selection";
-        }
-    }
-
+    // 2. FETCH PRODUCTS
     function fetchTargetProducts() {
-        let box = document.getElementById("searchBox");
-        box.placeholder = "Loading Products...";
-        
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
             Type: "criteria", 
@@ -168,111 +121,91 @@
         })
         .then(function(data){
             if(data.data){
-                masterProductList = data.data.filter(p => 
-                    p.Category != null && p.Category.toLowerCase().includes("phone")
-                );
-                box.placeholder = "Tap to view " + masterProductList.length + " phones...";
-                log("Products Loaded: " + masterProductList.length);
-            } else {
-                box.placeholder = "No products found.";
+                masterProductList = data.data.filter(p => p.Category != null && p.Category.toLowerCase().includes("phone"));
+                document.getElementById("searchBox").placeholder = "Tap to view " + masterProductList.length + " phones...";
             }
-        })
-        .catch(function(err){
-            log("PRODUCT ERROR: " + JSON.stringify(err));
         });
     }
 
-    // --- UI HELPERS (Unchanged) ---
+    // 3. SAVE LOGIC (The Critical Part)
+    function submitToCRM() {
+        if(cart.length === 0) return alert("Cart is empty.");
+        if(!dealId) return alert("No Deal ID.");
+
+        document.getElementById("submitBtn").innerText = "Saving...";
+
+        // Step A: Get Existing Rows (To prevent overwrite)
+        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
+        .then(function(response){
+            let currentData = response.data[0];
+            let apiNameSubform = "Phone_Hardware";
+            let apiNameLookup = "Phone_Selection";
+            let apiNameQty = "Phone_Qty";
+
+            let updateList = [];
+            
+            // Keep Old Rows
+            if(currentData[apiNameSubform]) {
+                currentData[apiNameSubform].forEach(row => {
+                    if(row.id) updateList.push({ "id": row.id.toString() });
+                });
+            }
+
+            // Add New Rows
+            cart.forEach(item => {
+                let row = {};
+                row[apiNameLookup] = { "id": item.product_id.toString() }; // Force ID String
+                row[apiNameQty] = parseInt(item.quantity);                 // Force Qty Int
+                updateList.push(row);
+            });
+
+            // Step B: Push Update
+            let payload = { "id": dealId, [apiNameSubform]: updateList };
+            
+            ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
+            .then(function(data){
+                alert("✅ SUCCESS! Data saved to Deal.");
+                document.getElementById("submitBtn").innerText = "Saved";
+            })
+            .catch(function(err){
+                alert("❌ SAVE ERROR:\n" + JSON.stringify(err));
+                document.getElementById("submitBtn").innerText = "Retry Save";
+            });
+        });
+    }
+
+    // UI Helpers (Standard)
     function showAllProducts() { renderDropdown(masterProductList); }
     function filterLocalProducts() {
-        let query = document.getElementById("searchBox").value.toLowerCase();
-        let filtered = masterProductList.filter(p => p.Product_Name.toLowerCase().includes(query));
-        renderDropdown(filtered);
+        let q = document.getElementById("searchBox").value.toLowerCase();
+        renderDropdown(masterProductList.filter(p => p.Product_Name.toLowerCase().includes(q)));
     }
     function renderDropdown(items) {
         let html = "";
-        if(items.length > 0) {
-            items.forEach(p => {
-                let safeName = p.Product_Name.replace(/"/g, '&quot;');
-                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${safeName}")'>${safeName} - $${p.Unit_Price}</div>`;
-            });
-            document.getElementById("results").style.display = "block";
-            document.getElementById("results").innerHTML = html;
-        } else { document.getElementById("results").style.display = "none"; }
+        items.forEach(p => {
+            html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name.replace(/"/g, '&quot;')}")'>${p.Product_Name}</div>`;
+        });
+        document.getElementById("results").innerHTML = html;
+        document.getElementById("results").style.display = items.length ? "block" : "none";
     }
     function selectProduct(id, name) {
-        if(!id || id === "undefined") { alert("Invalid Product ID"); return; }
-        selectedProduct = {id: id.toString(), name: name}; 
+        selectedProduct = {id:id, name:name};
         document.getElementById("results").style.display = "none";
-        document.getElementById("searchBox").value = ""; 
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
-        document.getElementById("qtyInput").focus();
     }
     function addToCart() {
-        let qty = document.getElementById("qtyInput").value;
-        if(qty <= 0) return; 
-        cart.push({ product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: qty });
+        cart.push({product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: document.getElementById("qtyInput").value});
         renderCart();
-        cancelSelection();
-    }
-    function cancelSelection() {
-        selectedProduct = null;
         document.getElementById("qtySection").style.display = "none";
     }
     function renderCart() {
         let html = "";
-        cart.forEach((item, index) => {
-            html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td><button onclick="cart.splice(${index},1);renderCart()" style="background:red; padding:5px 10px;">X</button></td></tr>`;
-        });
+        cart.forEach(item => html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td></tr>`);
         document.getElementById("cartBody").innerHTML = html;
     }
-
-    // --- SUBMIT TO CRM ---
-    function submitToCRM() {
-        if(cart.length === 0) { alert("Please add at least one item."); return; }
-        if(!dealId) { alert("Error: Deal ID missing. Please refresh."); return; }
-
-        let btn = document.getElementById("submitBtn");
-        btn.disabled = true;
-        btn.innerText = "Saving...";
-
-        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
-        .then(function(response){
-            let currentData = response.data[0];
-            let subformApiName = "Phone_Hardware"; 
-            let existingRows = currentData[subformApiName]; 
-            let finalUpdateList = [];
-
-            if(existingRows && existingRows.length > 0){
-                existingRows.forEach(row => { if(row.id) finalUpdateList.push({ "id": row.id.toString() }); });
-            }
-
-            cart.forEach(item => {
-                let newRow = {};
-                newRow["Phone_Selection"] = { "id": item.product_id.toString() }; 
-                newRow["Phone_Qty"] = parseInt(item.quantity);         
-                finalUpdateList.push(newRow);
-            });
-
-            let updatePayload = { "id": dealId.toString(), [subformApiName]: finalUpdateList };
-            var config = { Entity: "Deals", APIData: updatePayload, Trigger: ["workflow"] };
-            
-            ZOHO.CRM.API.updateRecord(config)
-            .then(function(data){
-                document.getElementById("mainInterface").style.display = "none";
-                document.getElementById("successScreen").style.display = "block";
-                setTimeout(function(){ ZOHO.CRM.BLUEPRINT.proceed(); }, 1500);
-            })
-            .catch(function(err){
-                btn.disabled = false; btn.innerText = "Retry Selection";
-                alert("Save Failed: " + JSON.stringify(err));
-            });
-        })
-        .catch(function(fetchErr){
-             btn.disabled = false; alert("Could not fetch existing Deal data.");
-        });
-    }
+    function cancelSelection() { document.getElementById("qtySection").style.display = "none"; }
 </script>
+
 </body>
 </html>
