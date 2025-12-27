@@ -2,8 +2,8 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Data Focus</title>
-    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+    <title>Quote Kiosk - Final Fix</title>
+    <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
         .kiosk-container { max-width: 600px; margin: 0 auto; }
@@ -18,10 +18,11 @@
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         
-        /* Manual ID Box - The "Fail Safe" */
+        #statusArea { font-weight: bold; margin-bottom: 10px; color: #555; }
+        .status-ok { color: green; }
+        
+        /* Manual ID Box - Kept as a fallback just in case */
         #manualIdArea { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; margin-bottom: 20px; display:none; }
-        .status-ok { color: green; font-weight: bold; }
-        .status-err { color: red; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -29,15 +30,8 @@
 <div class="kiosk-container">
     <h2>Add Hardware to Deal</h2>
 
-    <div id="statusArea">Initializing...</div>
+    <div id="statusArea">Initializing SDK...</div>
 
-    <div id="manualIdArea">
-        <strong>⚠️ Auto-Detect Failed</strong><br>
-        <span style="font-size:12px; color:#666;">This happens when testing outside the standard context. Paste Deal ID below to proceed.</span><br><br>
-        <input type="text" id="manualIdInput" placeholder="Paste Deal ID here (e.g. 56987...)">
-        <button onclick="setManualId()" style="background:#e0a800; padding:10px;">Set ID</button>
-    </div>
-    
     <input type="text" id="searchBox" placeholder="Loading Products..." 
            onfocus="showAllProducts()" 
            onkeyup="filterLocalProducts()">  
@@ -65,39 +59,53 @@
     <div style="margin-top: 30px; text-align: right;">
         <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Waiting for ID...</button>
     </div>
+
+    <div id="manualIdArea">
+        <strong>⚠️ Auto-Detect Failed</strong><br>
+        <input type="text" id="manualIdInput" placeholder="Paste Deal ID here">
+        <button onclick="setManualId()">Set ID</button>
+    </div>
 </div>
 
 <script>
     let cart = [];
     let masterProductList = []; 
     let selectedProduct = null;
-    let dealId = "";
+    let dealId = ""; // This replaces ZOHO_RECORD_ID from your other file
 
-    // 1. INITIALIZE
-    ZOHO.embeddedApp.init().then(function(){
-        document.getElementById("statusArea").innerHTML = "SDK Ready. Looking for ID...";
-        
-        // Fetch Products Immediately
-        fetchTargetProducts();
-
-        // Listen for ID
-        ZOHO.embeddedApp.on("PageLoad", function(data){
-            if(data && data.EntityId) {
-                let id = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
-                setDealId(id, "Auto-Detected");
+    /* =======================================================
+       1. INITIALIZATION (METHODOLOGY FROM SOLUTION BUILDER)
+       ======================================================= */
+    
+    // STEP A: Define the Listener FIRST (Before Init)
+    ZOHO.embeddedApp.on("PageLoad", function(data){
+        // This logic is copied directly from Solution Builder v7
+        if(data && data.EntityId) {
+            let extractedId = data.EntityId;
+            
+            // Handle Array vs String
+            if(Array.isArray(extractedId)) {
+                extractedId = extractedId[0];
             }
-        });
 
-        // If no ID found after 2 seconds, show manual box
-        setTimeout(function(){
-            if(!dealId) document.getElementById("manualIdArea").style.display = "block";
-        }, 2000);
+            // Success!
+            setDealId(extractedId, "Auto-Detected");
+        }
     });
+
+    // STEP B: Initialize the App SECOND
+    ZOHO.embeddedApp.init().then(function(){
+        // SDK is ready, fetch products immediately
+        fetchTargetProducts();
+    });
+
+    /* =======================================================
+       2. CORE FUNCTIONS
+       ======================================================= */
 
     function setDealId(id, source) {
         dealId = id;
-        let msg = "✅ Connected to Deal: " + dealId + " (" + source + ")";
-        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>${msg}</span>`;
+        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>✅ Connected to Deal: ${dealId}</span>`;
         document.getElementById("manualIdArea").style.display = "none";
         
         let btn = document.getElementById("submitBtn");
@@ -109,10 +117,8 @@
     function setManualId() {
         let val = document.getElementById("manualIdInput").value.trim();
         if(val.length > 5) setDealId(val, "Manual");
-        else alert("Invalid ID");
     }
 
-    // 2. FETCH PRODUCTS
     function fetchTargetProducts() {
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
@@ -127,14 +133,13 @@
         });
     }
 
-    // 3. SAVE LOGIC (The Critical Part)
     function submitToCRM() {
         if(cart.length === 0) return alert("Cart is empty.");
         if(!dealId) return alert("No Deal ID.");
 
         document.getElementById("submitBtn").innerText = "Saving...";
 
-        // Step A: Get Existing Rows (To prevent overwrite)
+        // 1. Get Existing Data
         ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
         .then(function(response){
             let currentData = response.data[0];
@@ -144,28 +149,30 @@
 
             let updateList = [];
             
-            // Keep Old Rows
+            // 2. Preserve Existing Rows
             if(currentData[apiNameSubform]) {
                 currentData[apiNameSubform].forEach(row => {
                     if(row.id) updateList.push({ "id": row.id.toString() });
                 });
             }
 
-            // Add New Rows
+            // 3. Append New Rows
             cart.forEach(item => {
                 let row = {};
-                row[apiNameLookup] = { "id": item.product_id.toString() }; // Force ID String
-                row[apiNameQty] = parseInt(item.quantity);                 // Force Qty Int
+                row[apiNameLookup] = { "id": item.product_id.toString() }; 
+                row[apiNameQty] = parseInt(item.quantity);                 
                 updateList.push(row);
             });
 
-            // Step B: Push Update
+            // 4. Save
             let payload = { "id": dealId, [apiNameSubform]: updateList };
             
             ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
             .then(function(data){
-                alert("✅ SUCCESS! Data saved to Deal.");
+                alert("✅ SUCCESS! Hardware saved to Opportunity.");
                 document.getElementById("submitBtn").innerText = "Saved";
+                // Optional: Close modal if needed
+                // ZOHO.CRM.UI.Popup.close();
             })
             .catch(function(err){
                 alert("❌ SAVE ERROR:\n" + JSON.stringify(err));
@@ -174,7 +181,7 @@
         });
     }
 
-    // UI Helpers (Standard)
+    // --- UI HELPERS ---
     function showAllProducts() { renderDropdown(masterProductList); }
     function filterLocalProducts() {
         let q = document.getElementById("searchBox").value.toLowerCase();
