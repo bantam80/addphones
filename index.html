@@ -2,14 +2,15 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Final Fix</title>
+    <title>Quote Kiosk - Production</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
         .kiosk-container { max-width: 600px; margin: 0 auto; }
         
         input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
-        button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; transition: all 0.3s ease; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; opacity: 0.7; }
         
         #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; }
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
@@ -18,10 +19,10 @@
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         
-        #statusArea { font-weight: bold; margin-bottom: 10px; color: #555; }
+        #statusArea { font-weight: bold; margin-bottom: 10px; color: #555; font-size: 14px; }
         .status-ok { color: green; }
         
-        /* Manual ID Box - Kept as a fallback just in case */
+        /* Manual ID Box - Fallback */
         #manualIdArea { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; margin-bottom: 20px; display:none; }
     </style>
 </head>
@@ -37,7 +38,7 @@
            onkeyup="filterLocalProducts()">  
     <div id="results"></div>
 
-    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px;">
+    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px; border-radius: 5px;">
         <h3 id="selectedName" style="margin-top:0;"></h3>
         <label>Quantity:</label>
         <input type="number" id="qtyInput" value="1" min="1" style="width:100px; display:inline-block; margin-right:10px;">
@@ -68,50 +69,104 @@
 </div>
 
 <script>
+    /* =======================================================
+       1. CONFIGURATION & STATE
+       ======================================================= */
     let cart = [];
     let masterProductList = []; 
     let selectedProduct = null;
-    let dealId = ""; // This replaces ZOHO_RECORD_ID from your other file
+    let dealId = ""; 
 
     /* =======================================================
-       1. INITIALIZATION (METHODOLOGY FROM SOLUTION BUILDER)
+       2. INITIALIZATION (METHODOLOGY: LISTENER FIRST)
        ======================================================= */
     
-    // STEP A: Define the Listener FIRST (Before Init)
+    // Define Listener BEFORE Init (Crucial for race conditions)
     ZOHO.embeddedApp.on("PageLoad", function(data){
-        // This logic is copied directly from Solution Builder v7
         if(data && data.EntityId) {
             let extractedId = data.EntityId;
-            
-            // Handle Array vs String
-            if(Array.isArray(extractedId)) {
-                extractedId = extractedId[0];
-            }
-
-            // Success!
+            if(Array.isArray(extractedId)) extractedId = extractedId[0];
             setDealId(extractedId, "Auto-Detected");
         }
     });
 
-    // STEP B: Initialize the App SECOND
+    // Initialize App
     ZOHO.embeddedApp.init().then(function(){
-        // SDK is ready, fetch products immediately
         fetchTargetProducts();
     });
 
     /* =======================================================
-       2. CORE FUNCTIONS
+       3. SUBMISSION LOGIC (METHODOLOGY: CLEAN PROCEED)
+       ======================================================= */
+    function submitToCRM() {
+        if(cart.length === 0) return alert("Cart is empty.");
+        if(!dealId) return alert("No Deal ID.");
+
+        // A. Visual Feedback (Like Solution Builder)
+        const btn = document.getElementById("submitBtn");
+        btn.innerText = "Saving & Completing...";
+        btn.disabled = true;
+        btn.style.opacity = "0.7";
+
+        // B. Prepare Data
+        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
+        .then(function(response){
+            let currentData = response.data[0];
+            let apiNameSubform = "Phone_Hardware";
+            let apiNameLookup = "Phone_Selection";
+            let apiNameQty = "Phone_Qty";
+
+            let updateList = [];
+            
+            // Preserve Existing Rows
+            if(currentData[apiNameSubform]) {
+                currentData[apiNameSubform].forEach(row => {
+                    if(row.id) updateList.push({ "id": row.id.toString() });
+                });
+            }
+
+            // Append New Rows
+            cart.forEach(item => {
+                let row = {};
+                row[apiNameLookup] = { "id": item.product_id.toString() }; 
+                row[apiNameQty] = parseInt(item.quantity);                 
+                updateList.push(row);
+            });
+
+            let payload = { "id": dealId, [apiNameSubform]: updateList };
+            
+            // C. Update & Proceed
+            ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
+            .then(function(data){
+                // SUCCESS: NATIVE BLUEPRINT TRANSITION
+                // This closes the widget and moves the Blueprint forward immediately.
+                ZOHO.CRM.BLUEPRINT.proceed({
+                    action: "save",
+                    data: {}
+                });
+            })
+            .catch(function(err){
+                alert("Save Failed: " + JSON.stringify(err));
+                btn.disabled = false;
+                btn.innerText = "Retry Save";
+                btn.style.opacity = "1";
+            });
+        });
+    }
+
+    /* =======================================================
+       4. HELPER FUNCTIONS
        ======================================================= */
 
     function setDealId(id, source) {
         dealId = id;
-        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>✅ Connected to Deal: ${dealId}</span>`;
+        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>✅ Connected to Deal</span>`;
         document.getElementById("manualIdArea").style.display = "none";
         
         let btn = document.getElementById("submitBtn");
         btn.disabled = false;
         btn.style.background = "#28a745";
-        btn.innerText = "Save to Opportunity";
+        btn.innerText = "Complete Selection";
     }
 
     function setManualId() {
@@ -133,55 +188,7 @@
         });
     }
 
-    function submitToCRM() {
-        if(cart.length === 0) return alert("Cart is empty.");
-        if(!dealId) return alert("No Deal ID.");
-
-        document.getElementById("submitBtn").innerText = "Saving...";
-
-        // 1. Get Existing Data
-        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
-        .then(function(response){
-            let currentData = response.data[0];
-            let apiNameSubform = "Phone_Hardware";
-            let apiNameLookup = "Phone_Selection";
-            let apiNameQty = "Phone_Qty";
-
-            let updateList = [];
-            
-            // 2. Preserve Existing Rows
-            if(currentData[apiNameSubform]) {
-                currentData[apiNameSubform].forEach(row => {
-                    if(row.id) updateList.push({ "id": row.id.toString() });
-                });
-            }
-
-            // 3. Append New Rows
-            cart.forEach(item => {
-                let row = {};
-                row[apiNameLookup] = { "id": item.product_id.toString() }; 
-                row[apiNameQty] = parseInt(item.quantity);                 
-                updateList.push(row);
-            });
-
-            // 4. Save
-            let payload = { "id": dealId, [apiNameSubform]: updateList };
-            
-            ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
-            .then(function(data){
-                alert("✅ SUCCESS! Hardware saved to Opportunity.");
-                document.getElementById("submitBtn").innerText = "Saved";
-                // Optional: Close modal if needed
-                // ZOHO.CRM.UI.Popup.close();
-            })
-            .catch(function(err){
-                alert("❌ SAVE ERROR:\n" + JSON.stringify(err));
-                document.getElementById("submitBtn").innerText = "Retry Save";
-            });
-        });
-    }
-
-    // --- UI HELPERS ---
+    // UI Helpers
     function showAllProducts() { renderDropdown(masterProductList); }
     function filterLocalProducts() {
         let q = document.getElementById("searchBox").value.toLowerCase();
