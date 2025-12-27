@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Quote Kiosk</title>
+    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+    <style>
+        /* Kiosk Styling: Big fonts, easy touch targets */
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .kiosk-container { max-width: 600px; margin: 0 auto; }
+        input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
+        button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        #results { border: 1px solid #ddd; max-height: 200px; overflow-y: auto; display: none; margin-bottom: 20px;}
+        .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
+        .result-item:hover { background-color: #f0f0f0; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
+        .footer { margin-top: 30px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div class="kiosk-container">
+    <h2>Add Products to Quote</h2>
+    
+    <input type="text" id="searchBox" placeholder="Search Product Name..." onkeyup="searchProducts()">
+    <div id="results"></div>
+
+    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px;">
+        <h3 id="selectedName"></h3>
+        <input type="number" id="qtyInput" value="1" min="1">
+        <button onclick="addToCart()">Add to Cart</button>
+        <button onclick="cancelSelection()" style="background:#666;">Cancel</button>
+    </div>
+
+    <table id="cartTable">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="cartBody"></tbody>
+    </table>
+
+    <div class="footer">
+        <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Create Quote</button>
+    </div>
+</div>
+
+<script>
+    let cart = [];
+    let selectedProduct = null;
+    let dealId = "";
+
+    // 1. Initialize Widget
+    ZOHO.embeddedApp.init().then(function(){
+        ZOHO.embeddedApp.on("PageLoad", function(data){
+            dealId = data.EntityId[0]; // Capture the Deal ID
+        });
+    });
+
+    // 2. Search Products
+    function searchProducts() {
+        let query = document.getElementById("searchBox").value;
+        if(query.length < 3) return;
+
+        ZOHO.CRM.API.searchRecord({Entity:"Products", Type:"word", Query:query})
+        .then(function(data){
+            let html = "";
+            if(data.data){
+                data.data.forEach(p => {
+                    // Pass ID and Name to select function
+                    html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>${p.Product_Name} - $${p.Unit_Price}</div>`;
+                });
+                document.getElementById("results").style.display = "block";
+                document.getElementById("results").innerHTML = html;
+            }
+        });
+    }
+
+    // 3. UI Helpers
+    function selectProduct(id, name) {
+        selectedProduct = {id: id, name: name};
+        document.getElementById("results").style.display = "none";
+        document.getElementById("searchBox").value = ""; // Clear search
+        
+        // Show Qty UI
+        document.getElementById("qtySection").style.display = "block";
+        document.getElementById("selectedName").innerText = name;
+        document.getElementById("qtyInput").focus();
+    }
+
+    function addToCart() {
+        let qty = document.getElementById("qtyInput").value;
+        cart.push({
+            product_id: selectedProduct.id, 
+            product_name: selectedProduct.name, 
+            quantity: qty
+        });
+        
+        renderCart();
+        cancelSelection();
+    }
+
+    function cancelSelection() {
+        selectedProduct = null;
+        document.getElementById("qtySection").style.display = "none";
+    }
+
+    function renderCart() {
+        let html = "";
+        cart.forEach((item, index) => {
+            html += `<tr>
+                <td>${item.product_name}</td>
+                <td>${item.quantity}</td>
+                <td><button onclick="cart.splice(${index},1);renderCart()" style="background:red; padding:5px 10px;">X</button></td>
+            </tr>`;
+        });
+        document.getElementById("cartBody").innerHTML = html;
+    }
+
+    // 4. Submit to Deal Subform
+    function submitToCRM() {
+        if(cart.length === 0) {
+            alert("Cart is empty!");
+            return;
+        }
+
+        // Format for Zoho Subform: List of Maps
+        // REPLACE 'Draft_Products' with your Subform API Name
+        // REPLACE 'Product' and 'Quantity' with Field API Names inside Subform
+        let subformList = [];
+        cart.forEach(item => {
+            let row = {};
+            row["Product"] = item.product_id; 
+            row["Quantity"] = item.quantity;
+            subformList.push(row);
+        });
+
+        let updateData = {
+            "id": dealId,
+            "Draft_Products": subformList // The API Name of the subform on the Deal
+        };
+
+        var config = {
+            Entity: "Deals",
+            APIData: updateData,
+            Trigger: ["workflow"] // Ensure workflows trigger if needed
+        };
+
+        ZOHO.CRM.API.updateRecord(config)
+        .then(function(data){
+            // Success! Now close the widget and move the blueprint forward
+            // This tells the Blueprint to complete the "Generate Quote" transition
+            ZOHO.CRM.BLUEPRINT.proceed(); 
+        })
+        .catch(function(err){
+            alert("Error saving: " + JSON.stringify(err));
+        });
+    }
+</script>
+
+</body>
+</html>
