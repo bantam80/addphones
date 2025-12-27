@@ -1,14 +1,114 @@
-function fetchTargetProducts() {
-        document.getElementById("searchBox").placeholder = "Loading Products from CRM...";
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Quote Kiosk - V3</title>
+    <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .kiosk-container { max-width: 600px; margin: 0 auto; }
+        input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
+        button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        
+        #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
+        .result-item:hover { background-color: #f0f0f0; }
+        
+        /* Debug Box Styling */
+        #debugLog { 
+            margin-top: 20px; 
+            padding: 10px; 
+            background: #ffe6e6; 
+            border: 1px solid red; 
+            color: #d8000c; 
+            font-family: monospace; 
+            font-size: 12px;
+            white-space: pre-wrap;
+            display: block; 
+        }
+
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
+        .footer { margin-top: 30px; text-align: right; }
+    </style>
+</head>
+<body>
+
+<div class="kiosk-container">
+    <h2>Select Hardware</h2>
+    
+    <input type="text" id="searchBox" placeholder="Initializing..." 
+           onfocus="showAllProducts()" 
+           onkeyup="filterLocalProducts()">
+           
+    <div id="results"></div>
+
+    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px; border-radius:8px;">
+        <h3 id="selectedName" style="margin-top:0;"></h3>
+        <label>Quantity:</label>
+        <input type="number" id="qtyInput" value="1" min="1" style="width:100px; display:inline-block; margin-right:10px;">
+        <button onclick="addToCart()">Add to Cart</button>
+        <button onclick="cancelSelection()" style="background:#666; margin-left:10px;">Cancel</button>
+    </div>
+
+    <table id="cartTable">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody id="cartBody"></tbody>
+    </table>
+
+    <div class="footer">
+        <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Complete Selection</button>
+    </div>
+
+    <div id="debugLog">Waiting for SDK...</div>
+</div>
+
+<script>
+    // --- GLOBAL VARIABLES ---
+    let cart = [];
+    let masterProductList = []; 
+    let selectedProduct = null;
+    let dealId = "";
+
+    // --- LOGGING HELPER ---
+    function log(msg) {
+        let d = new Date();
+        let time = d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+        let box = document.getElementById("debugLog");
+        if(box) {
+            box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
+        }
+        console.log(msg);
+    }
+
+    // --- INITIALIZATION ---
+    ZOHO.embeddedApp.init().then(function(){
+        log("SDK Initialized.");
+        
+        ZOHO.embeddedApp.on("PageLoad", function(data){
+            if(data && data.EntityId){
+                dealId = data.EntityId[0];
+                log("Deal ID Captured: " + dealId);
+            }
+        });
+
+        // Start the fetch immediately
+        fetchTargetProducts();
+    });
+
+    // --- DATA FETCHING (Using SearchRecords) ---
+    function fetchTargetProducts() {
+        let box = document.getElementById("searchBox");
+        box.placeholder = "Loading Products from CRM...";
         log("Attempting Standard Search...");
 
-        // STRATEGY CHANGE: 
-        // We use .searchRecords() instead of .coql(). It is much more robust.
-        // We fetch ALL products where Hardware_Type is NA, then filter for 'phone' in Javascript.
-        
-        // 1. Define Criteria: ((Hardware_Type:equals:NA))
-        // Note: Ensure 'Hardware_Type' matches your API name exactly.
-        
+        // SEARCH QUERY: Hardware_Type equals NA
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
             Type: "criteria", 
@@ -19,22 +119,19 @@ function fetchTargetProducts() {
                 let rawList = data.data;
                 log("Raw Fetch Complete. Found " + rawList.length + " items. Filtering for 'phone'...");
 
-                // 2. Client-Side Filter: Keep only items where Category contains "phone"
-                // Using "Category" API Name we found earlier.
+                // CLIENT-SIDE FILTER: Check if Category contains "phone"
                 masterProductList = rawList.filter(p => 
                     p.Category != null && p.Category.toLowerCase().includes("phone")
                 );
 
                 let count = masterProductList.length;
                 
-                // 3. Feedback
                 log("FILTER SUCCESS: Found " + count + " phones.");
-                document.getElementById("searchBox").placeholder = "Tap to view " + count + " phones...";
-                alert("Success! Loaded " + count + " phones.");
+                box.placeholder = "Tap to view " + count + " phones...";
                 
             } else {
                 log("Search ran but returned 0 items.");
-                document.getElementById("searchBox").placeholder = "No products found.";
+                box.placeholder = "No products found.";
             }
         })
         .catch(function(err){
@@ -43,3 +140,115 @@ function fetchTargetProducts() {
             alert("API Error: " + errText);
         });
     }
+
+    // --- UI FUNCTIONS ---
+    function showAllProducts() {
+        renderDropdown(masterProductList);
+    }
+
+    function filterLocalProducts() {
+        let query = document.getElementById("searchBox").value.toLowerCase();
+        let filtered = masterProductList.filter(p => 
+            p.Product_Name.toLowerCase().includes(query)
+        );
+        renderDropdown(filtered);
+    }
+
+    function renderDropdown(items) {
+        let html = "";
+        if(items.length > 0) {
+            items.forEach(p => {
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>
+                            ${p.Product_Name} - $${p.Unit_Price}
+                         </div>`;
+            });
+            document.getElementById("results").style.display = "block";
+            document.getElementById("results").innerHTML = html;
+        } else {
+             document.getElementById("results").style.display = "none";
+        }
+    }
+
+    function selectProduct(id, name) {
+        selectedProduct = {id: id, name: name};
+        document.getElementById("results").style.display = "none";
+        document.getElementById("searchBox").value = ""; 
+        
+        document.getElementById("qtySection").style.display = "block";
+        document.getElementById("selectedName").innerText = name;
+        document.getElementById("qtyInput").focus();
+    }
+
+    function addToCart() {
+        let qty = document.getElementById("qtyInput").value;
+        if(qty <= 0) return; 
+
+        cart.push({
+            product_id: selectedProduct.id, 
+            product_name: selectedProduct.name, 
+            quantity: qty
+        });
+        
+        renderCart();
+        cancelSelection();
+    }
+
+    function cancelSelection() {
+        selectedProduct = null;
+        document.getElementById("qtySection").style.display = "none";
+    }
+
+    function renderCart() {
+        let html = "";
+        cart.forEach((item, index) => {
+            html += `<tr>
+                <td>${item.product_name}</td>
+                <td>${item.quantity}</td>
+                <td><button onclick="cart.splice(${index},1);renderCart()" style="background:red; padding:5px 10px;">X</button></td>
+            </tr>`;
+        });
+        document.getElementById("cartBody").innerHTML = html;
+    }
+
+    // --- SUBMIT TO CRM ---
+    function submitToCRM() {
+        if(cart.length === 0) {
+            alert("Please add at least one item.");
+            return;
+        }
+        log("Submitting to CRM...");
+
+        let subformList = [];
+        cart.forEach(item => {
+            let row = {};
+            // Ensure these match your Deal Subform API Names
+            row["Product"] = item.product_id; 
+            row["Quantity"] = item.quantity;
+            subformList.push(row);
+        });
+
+        let updateData = {
+            "id": dealId,
+            "Draft_Products": subformList 
+        };
+
+        var config = {
+            Entity: "Deals",
+            APIData: updateData,
+            Trigger: ["workflow"] 
+        };
+
+        ZOHO.CRM.API.updateRecord(config)
+        .then(function(data){
+            log("CRM Update Success!");
+            ZOHO.CRM.BLUEPRINT.proceed(); 
+        })
+        .catch(function(err){
+            log("SAVE ERROR: " + JSON.stringify(err));
+            alert("Error saving: " + JSON.stringify(err));
+        });
+    }
+</script>
+
+</body>
+</html>
