@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Final</title>
+    <title>Quote Kiosk - DEBUG MASTER</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -28,7 +28,7 @@
 <body>
 
 <div class="kiosk-container">
-    <h2>Select Hardware</h2>
+    <h2>Select Hardware (Debug Mode)</h2>
     
     <input type="text" id="searchBox" placeholder="Initializing..." 
            onfocus="showAllProducts()" 
@@ -59,7 +59,7 @@
         <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Complete Selection</button>
     </div>
 
-    <div id="debugLog">Waiting for 2 SDK...</div>
+    <div id="debugLog">Waiting for 3 SDK...</div>
 </div>
 
 <script>
@@ -93,7 +93,7 @@
     function fetchTargetProducts() {
         let box = document.getElementById("searchBox");
         box.placeholder = "Loading Products from CRM...";
-        log("Fetching products...");
+        log("Fetching products (Hardware_Type=NA)...");
 
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
@@ -133,7 +133,11 @@
         let html = "";
         if(items.length > 0) {
             items.forEach(p => {
-                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>${p.Product_Name} - $${p.Unit_Price}</div>`;
+                let safeName = p.Product_Name.replace(/"/g, '&quot;');
+                // EXPLICIT .toString() ON ID
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${safeName}")'>
+                            ${safeName} - $${p.Unit_Price}
+                         </div>`;
             });
             document.getElementById("results").style.display = "block";
             document.getElementById("results").innerHTML = html;
@@ -143,7 +147,12 @@
     }
 
     function selectProduct(id, name) {
-        selectedProduct = {id: id, name: name};
+        // ID VALIDATION
+        if(!id || id === "undefined" || id === "null") {
+            alert("Error: Invalid Product ID. Please refresh.");
+            return;
+        }
+        selectedProduct = {id: id.toString(), name: name}; 
         document.getElementById("results").style.display = "none";
         document.getElementById("searchBox").value = ""; 
         document.getElementById("qtySection").style.display = "block";
@@ -154,6 +163,12 @@
     function addToCart() {
         let qty = document.getElementById("qtyInput").value;
         if(qty <= 0) return; 
+        
+        if(!selectedProduct || !selectedProduct.id) {
+             alert("Error: No product selected.");
+             return;
+        }
+
         cart.push({ product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: qty });
         renderCart();
         cancelSelection();
@@ -172,41 +187,53 @@
         document.getElementById("cartBody").innerHTML = html;
     }
 
-    // --- SUBMIT TO CRM (FIXED) ---
+    // --- SUBMIT TO CRM (WITH PAYLOAD DEBUGGER) ---
     function submitToCRM() {
         if(cart.length === 0) { alert("Please add at least one item."); return; }
         
-        // 1. GET CURRENT DATA
+        log("Step 1: Fetching existing Deal data...");
+
         ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
         .then(function(response){
             
             let currentData = response.data[0];
-            let subformApiName = "Phone_Hardware"; // CONFIRMED
+            let subformApiName = "Phone_Hardware"; 
             let existingRows = currentData[subformApiName]; 
             let finalUpdateList = [];
 
-            // 2. KEEP EXISTING ROWS
+            // 1. KEEP EXISTING ROWS
             if(existingRows && existingRows.length > 0){
+                log("Processing " + existingRows.length + " existing rows...");
                 existingRows.forEach(row => {
-                    let oldRow = {};
-                    oldRow["id"] = row.id; 
-                    finalUpdateList.push(oldRow); 
+                    if(row.id) {
+                        // FORCE STRING ON ID
+                        finalUpdateList.push({ "id": row.id.toString() });
+                    }
                 });
             }
 
-            // 3. APPEND NEW ITEMS
+            // 2. APPEND NEW ITEMS
             cart.forEach(item => {
                 let newRow = {};
-                newRow["Phone_Selection"] = { "id": item.product_id }; // CONFIRMED
-                newRow["Phone_Qty"] = parseInt(item.quantity);         // CONFIRMED
+                // FORCE STRING ON PRODUCT ID
+                newRow["Phone_Selection"] = { "id": item.product_id.toString() }; 
+                // FORCE INTEGER ON QTY
+                newRow["Phone_Qty"] = parseInt(item.quantity);         
                 finalUpdateList.push(newRow);
             });
 
-            // 4. SEND UPDATE
+            // 3. CONSTRUCT PAYLOAD
             let updatePayload = {
-                "id": dealId,
+                "id": dealId.toString(),
                 [subformApiName]: finalUpdateList
             };
+
+            // --- VISUAL DEBUGGER ---
+            // This alert allows you to see the data before it fails
+            let jsonDebug = JSON.stringify(updatePayload);
+            alert("DEBUG PAYLOAD:\n" + jsonDebug);
+            console.log(jsonDebug);
+            // ---------------------
 
             var config = { Entity: "Deals", APIData: updatePayload, Trigger: ["workflow"] };
             
@@ -224,7 +251,7 @@
             });
         })
         .catch(function(fetchErr){
-             alert("Could not fetch existing Deal data.");
+             alert("Could not fetch existing Deal data. " + JSON.stringify(fetchErr));
         });
     }
 </script>
