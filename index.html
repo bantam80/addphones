@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V3</title>
+    <title>Quote Kiosk - Final</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -16,15 +16,8 @@
         
         /* Debug Box Styling */
         #debugLog { 
-            margin-top: 20px; 
-            padding: 10px; 
-            background: #ffe6e6; 
-            border: 1px solid red; 
-            color: #d8000c; 
-            font-family: monospace; 
-            font-size: 12px;
-            white-space: pre-wrap;
-            display: block; 
+            margin-top: 20px; padding: 10px; background: #ffe6e6; border: 1px solid red; 
+            color: #d8000c; font-family: monospace; font-size: 12px; white-space: pre-wrap; display: block; 
         }
 
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
@@ -76,39 +69,32 @@
     let selectedProduct = null;
     let dealId = "";
 
-    // --- LOGGING HELPER ---
     function log(msg) {
         let d = new Date();
         let time = d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
         let box = document.getElementById("debugLog");
-        if(box) {
-            box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
-        }
+        if(box) box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
         console.log(msg);
     }
 
     // --- INITIALIZATION ---
     ZOHO.embeddedApp.init().then(function(){
         log("SDK Initialized.");
-        
         ZOHO.embeddedApp.on("PageLoad", function(data){
             if(data && data.EntityId){
                 dealId = data.EntityId[0];
                 log("Deal ID Captured: " + dealId);
             }
         });
-
-        // Start the fetch immediately
         fetchTargetProducts();
     });
 
-    // --- DATA FETCHING (Using SearchRecords) ---
+    // --- FETCH PRODUCTS ---
     function fetchTargetProducts() {
         let box = document.getElementById("searchBox");
         box.placeholder = "Loading Products from CRM...";
-        log("Attempting Standard Search...");
+        log("Fetching products...");
 
-        // SEARCH QUERY: Hardware_Type equals NA
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
             Type: "criteria", 
@@ -117,18 +103,12 @@
         .then(function(data){
             if(data.data){
                 let rawList = data.data;
-                log("Raw Fetch Complete. Found " + rawList.length + " items. Filtering for 'phone'...");
-
-                // CLIENT-SIDE FILTER: Check if Category contains "phone"
                 masterProductList = rawList.filter(p => 
                     p.Category != null && p.Category.toLowerCase().includes("phone")
                 );
-
                 let count = masterProductList.length;
-                
                 log("FILTER SUCCESS: Found " + count + " phones.");
                 box.placeholder = "Tap to view " + count + " phones...";
-                
             } else {
                 log("Search ran but returned 0 items.");
                 box.placeholder = "No products found.";
@@ -137,20 +117,15 @@
         .catch(function(err){
             let errText = JSON.stringify(err);
             log("SEARCH ERROR: " + errText);
-            alert("API Error: " + errText);
         });
     }
 
-    // --- UI FUNCTIONS ---
-    function showAllProducts() {
-        renderDropdown(masterProductList);
-    }
+    // --- UI HELPERS ---
+    function showAllProducts() { renderDropdown(masterProductList); }
 
     function filterLocalProducts() {
         let query = document.getElementById("searchBox").value.toLowerCase();
-        let filtered = masterProductList.filter(p => 
-            p.Product_Name.toLowerCase().includes(query)
-        );
+        let filtered = masterProductList.filter(p => p.Product_Name.toLowerCase().includes(query));
         renderDropdown(filtered);
     }
 
@@ -158,9 +133,7 @@
         let html = "";
         if(items.length > 0) {
             items.forEach(p => {
-                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>
-                            ${p.Product_Name} - $${p.Unit_Price}
-                         </div>`;
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>${p.Product_Name} - $${p.Unit_Price}</div>`;
             });
             document.getElementById("results").style.display = "block";
             document.getElementById("results").innerHTML = html;
@@ -173,7 +146,6 @@
         selectedProduct = {id: id, name: name};
         document.getElementById("results").style.display = "none";
         document.getElementById("searchBox").value = ""; 
-        
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
         document.getElementById("qtyInput").focus();
@@ -182,13 +154,7 @@
     function addToCart() {
         let qty = document.getElementById("qtyInput").value;
         if(qty <= 0) return; 
-
-        cart.push({
-            product_id: selectedProduct.id, 
-            product_name: selectedProduct.name, 
-            quantity: qty
-        });
-        
+        cart.push({ product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: qty });
         renderCart();
         cancelSelection();
     }
@@ -201,51 +167,64 @@
     function renderCart() {
         let html = "";
         cart.forEach((item, index) => {
-            html += `<tr>
-                <td>${item.product_name}</td>
-                <td>${item.quantity}</td>
-                <td><button onclick="cart.splice(${index},1);renderCart()" style="background:red; padding:5px 10px;">X</button></td>
-            </tr>`;
+            html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td><button onclick="cart.splice(${index},1);renderCart()" style="background:red; padding:5px 10px;">X</button></td></tr>`;
         });
         document.getElementById("cartBody").innerHTML = html;
     }
 
-    // --- SUBMIT TO CRM ---
+    // --- SUBMIT TO CRM (FIXED) ---
     function submitToCRM() {
-        if(cart.length === 0) {
-            alert("Please add at least one item.");
-            return;
-        }
-        log("Submitting to CRM...");
+        if(cart.length === 0) { alert("Please add at least one item."); return; }
+        
+        // 1. GET CURRENT DATA
+        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
+        .then(function(response){
+            
+            let currentData = response.data[0];
+            let subformApiName = "Phone_Hardware"; // CONFIRMED
+            let existingRows = currentData[subformApiName]; 
+            let finalUpdateList = [];
 
-        let subformList = [];
-        cart.forEach(item => {
-            let row = {};
-            // Ensure these match your Deal Subform API Names
-            row["Product"] = item.product_id; 
-            row["Quantity"] = item.quantity;
-            subformList.push(row);
-        });
+            // 2. KEEP EXISTING ROWS
+            if(existingRows && existingRows.length > 0){
+                existingRows.forEach(row => {
+                    let oldRow = {};
+                    oldRow["id"] = row.id; 
+                    finalUpdateList.push(oldRow); 
+                });
+            }
 
-        let updateData = {
-            "id": dealId,
-            "Draft_Products": subformList 
-        };
+            // 3. APPEND NEW ITEMS
+            cart.forEach(item => {
+                let newRow = {};
+                newRow["Phone_Selection"] = { "id": item.product_id }; // CONFIRMED
+                newRow["Phone_Qty"] = parseInt(item.quantity);         // CONFIRMED
+                finalUpdateList.push(newRow);
+            });
 
-        var config = {
-            Entity: "Deals",
-            APIData: updateData,
-            Trigger: ["workflow"] 
-        };
+            // 4. SEND UPDATE
+            let updatePayload = {
+                "id": dealId,
+                [subformApiName]: finalUpdateList
+            };
 
-        ZOHO.CRM.API.updateRecord(config)
-        .then(function(data){
-            log("CRM Update Success!");
-            ZOHO.CRM.BLUEPRINT.proceed(); 
+            var config = { Entity: "Deals", APIData: updatePayload, Trigger: ["workflow"] };
+            
+            log("Sending payload...");
+            
+            ZOHO.CRM.API.updateRecord(config)
+            .then(function(data){
+                log("Success!");
+                ZOHO.CRM.BLUEPRINT.proceed();
+            })
+            .catch(function(err){
+                let errStr = JSON.stringify(err);
+                log("SAVE ERROR: " + errStr);
+                alert("Save Failed: " + errStr);
+            });
         })
-        .catch(function(err){
-            log("SAVE ERROR: " + JSON.stringify(err));
-            alert("Error saving: " + JSON.stringify(err));
+        .catch(function(fetchErr){
+             alert("Could not fetch existing Deal data.");
         });
     }
 </script>
