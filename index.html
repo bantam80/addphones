@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Production</title>
+    <title>Quote Kiosk - Blueprint Fixed</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -93,27 +93,47 @@
     // --- INITIALIZATION ---
     ZOHO.embeddedApp.init().then(function(){
         
+        // METHOD 1: Standard PageLoad (Works for Buttons)
         ZOHO.embeddedApp.on("PageLoad", function(data){
-            // 1. CAPTURE DEAL ID ROBUSTLY
-            if(data && data.EntityId){
-                if(Array.isArray(data.EntityId)){
-                    dealId = data.EntityId[0];
-                } else {
-                    dealId = data.EntityId;
-                }
-                
-                // 2. UNLOCK THE BUTTON (Prevents "Missing ID" error)
-                let btn = document.getElementById("submitBtn");
-                btn.disabled = false;
-                btn.style.background = "#28a745"; // Turn Green
-                btn.innerText = "Complete Selection";
-            } else {
-                log("ERROR: Widget loaded but EntityId was missing.");
-            }
+            // log("PageLoad Data: " + JSON.stringify(data)); // Uncomment to debug
+            if(data) handleDealId(data);
+        });
+
+        // METHOD 2: Blueprint Context (Works for Blueprint Transitions)
+        ZOHO.CRM.BLUEPRINT.contexts().then(function(bpData){
+            // log("Blueprint Data: " + JSON.stringify(bpData)); // Uncomment to debug
+            if(bpData) handleDealId(bpData);
         });
 
         fetchTargetProducts();
     });
+
+    // --- CENTRAL ID HANDLER ---
+    // Unlocks the button as soon as ID is found from ANY source
+    function handleDealId(data) {
+        // If we already have the ID, ignore future calls
+        if(dealId && dealId.length > 5) return;
+
+        let foundId = "";
+
+        // Check common ID locations
+        if(data.EntityId) {
+            foundId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+        } else if(data.id) {
+            foundId = data.id;
+        } else if(data.Record && data.Record.id) {
+             foundId = data.Record.id;
+        }
+
+        if(foundId) {
+            dealId = foundId;
+            // UNLOCK BUTTON
+            let btn = document.getElementById("submitBtn");
+            btn.disabled = false;
+            btn.style.background = "#28a745"; 
+            btn.innerText = "Complete Selection";
+        }
+    }
 
     function fetchTargetProducts() {
         let box = document.getElementById("searchBox");
