@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - DEBUG MASTER</title>
+    <title>Quote Kiosk - Retry Fix</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -22,26 +22,13 @@
         #successScreen { display: none; text-align: center; margin-top: 50px; }
         #successScreen h3 { font-size: 24px; color: #28a745; margin-bottom: 10px; }
         
-        /* DEBUG BOX ALWAYS VISIBLE */
-        #debugLog { 
-            display: block; 
-            margin-top: 20px; 
-            padding: 10px; 
-            background: #ffe6e6; 
-            border: 1px solid red; 
-            color: #d8000c; 
-            font-family: monospace; 
-            font-size: 12px; 
-            white-space: pre-wrap; 
-            height: 200px;
-            overflow-y: scroll;
-        }
+        #debugLog { display: block; margin-top: 20px; padding: 10px; background: #ffe6e6; border: 1px solid red; color: #d8000c; font-family: monospace; font-size: 12px; white-space: pre-wrap; height: 150px; overflow-y: scroll;}
     </style>
 </head>
 <body>
 
 <div id="mainInterface" class="kiosk-container">
-    <h2>Select Hardware (Debug)</h2>
+    <h2>Select Hardware R2</h2>
     
     <input type="text" id="searchBox" placeholder="Initializing..." 
            onfocus="showAllProducts()" 
@@ -72,12 +59,12 @@
         <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Loading Deal ID...</button>
     </div>
 
-    <div id="debugLog">Waiting for SDK...</div>
+    <div id="debugLog">Initializing...</div>
 </div>
 
 <div id="successScreen">
     <h3>Success!</h3>
-    <p>Hardware saved to Opportunity.</p>
+    <p>Hardware saved.</p>
     <p>Processing Blueprint...</p>
 </div>
 
@@ -86,6 +73,7 @@
     let masterProductList = []; 
     let selectedProduct = null;
     let dealId = "";
+    let retryCount = 0;
 
     function log(msg) {
         let box = document.getElementById("debugLog");
@@ -97,78 +85,81 @@
         console.log(msg);
     }
 
-    // --- 1. STARTUP ---
-    log("Script Loaded. Initializing SDK...");
-
+    // --- STARTUP ---
     ZOHO.embeddedApp.init().then(function(){
         log("SDK Init Success.");
 
-        // --- A. TRY FETCH PRODUCTS IMMEDIATELY ---
-        // We do not wait for Deal ID to fetch products. This unblocks the input box.
+        // 1. Fetch Products Immediately
         fetchTargetProducts();
 
-        // --- B. STRATEGY 1: PAGE LOAD ---
-        log("Listening for PageLoad event...");
+        // 2. Listen for PageLoad (Standard)
         ZOHO.embeddedApp.on("PageLoad", function(data){
-            log("EVENT: PageLoad Received.");
-            // log("RAW DATA: " + JSON.stringify(data)); 
             if(data) handleDealId(data, "PageLoad");
         });
 
-        // --- C. STRATEGY 2: BLUEPRINT CONTEXT ---
-        log("Attempting to fetch Blueprint Context...");
-        ZOHO.CRM.BLUEPRINT.contexts()
-        .then(function(bpData){
-            log("EVENT: Blueprint Context Received.");
-            // log("RAW BP DATA: " + JSON.stringify(bpData));
-            if(bpData) handleDealId(bpData, "Blueprint");
-        })
-        .catch(function(err){
-            log("Blueprint Context Error (Ignore if not in Blueprint): " + JSON.stringify(err));
-        });
+        // 3. Try Blueprint Context (With Retry Logic)
+        attemptBlueprintFetch();
 
     }).catch(function(e){
-        log("SDK INIT FAILED: " + JSON.stringify(e));
+        // This catches errors in the INIT chain
+        log("CRITICAL SDK ERROR: " + JSON.stringify(e));
     });
 
+    // --- BLUEPRINT RETRY SYSTEM ---
+    function attemptBlueprintFetch() {
+        if(dealId) return; // Stop if we already have it
+
+        log(`Attempting Blueprint Context (Try ${retryCount + 1})...`);
+        
+        ZOHO.CRM.BLUEPRINT.contexts()
+        .then(function(bpData){
+            if(bpData) {
+                handleDealId(bpData, "Blueprint");
+            } else {
+                handleRetry();
+            }
+        })
+        .catch(function(err){
+            log("Blueprint Context Failed: " + JSON.stringify(err));
+            handleRetry();
+        });
+    }
+
+    function handleRetry() {
+        if(dealId) return;
+        
+        retryCount++;
+        if(retryCount < 3) {
+            log("Context not ready. Retrying in 1.5s...");
+            setTimeout(attemptBlueprintFetch, 1500);
+        } else {
+            log("GAVE UP: Could not find Deal ID automatically.");
+            document.getElementById("submitBtn").innerText = "Error: Refresh Page";
+        }
+    }
 
     // --- CENTRAL ID HANDLER ---
     function handleDealId(data, source) {
-        if(dealId) return; // Already found it
+        if(dealId) return; 
 
         let foundId = "";
-
-        // Check 1: Standard EntityId (Array or String)
-        if(data.EntityId) {
-            foundId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
-        } 
-        // Check 2: Direct ID
-        else if(data.id) {
-            foundId = data.id;
-        } 
-        // Check 3: Record Object
-        else if(data.Record && data.Record.id) {
-             foundId = data.Record.id;
-        }
+        if(data.EntityId) foundId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+        else if(data.id) foundId = data.id;
+        else if(data.Record && data.Record.id) foundId = data.Record.id;
 
         if(foundId) {
             dealId = foundId;
             log("SUCCESS: Deal ID found via " + source + ": " + dealId);
-            
-            // Unlock Button
             let btn = document.getElementById("submitBtn");
             btn.disabled = false;
             btn.style.background = "#28a745"; 
             btn.innerText = "Complete Selection";
-        } else {
-            log("WARNING: " + source + " fired but contained no ID.");
         }
     }
 
     function fetchTargetProducts() {
         let box = document.getElementById("searchBox");
         box.placeholder = "Loading Products...";
-        log("Starting Product Fetch...");
         
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
@@ -177,51 +168,38 @@
         })
         .then(function(data){
             if(data.data){
-                let rawList = data.data;
-                log("Raw Fetch: " + rawList.length + " items.");
-                
-                masterProductList = rawList.filter(p => 
+                masterProductList = data.data.filter(p => 
                     p.Category != null && p.Category.toLowerCase().includes("phone")
                 );
-                
-                log("Filtered: " + masterProductList.length + " phones.");
                 box.placeholder = "Tap to view " + masterProductList.length + " phones...";
+                log("Products Loaded: " + masterProductList.length);
             } else {
-                log("Fetch Success but 0 results found.");
                 box.placeholder = "No products found.";
             }
         })
         .catch(function(err){
-            log("PRODUCT FETCH ERROR: " + JSON.stringify(err));
-            box.placeholder = "Error loading products.";
+            log("PRODUCT ERROR: " + JSON.stringify(err));
         });
     }
 
-    // --- UI HELPERS ---
+    // --- UI HELPERS (Unchanged) ---
     function showAllProducts() { renderDropdown(masterProductList); }
-
     function filterLocalProducts() {
         let query = document.getElementById("searchBox").value.toLowerCase();
         let filtered = masterProductList.filter(p => p.Product_Name.toLowerCase().includes(query));
         renderDropdown(filtered);
     }
-
     function renderDropdown(items) {
         let html = "";
         if(items.length > 0) {
             items.forEach(p => {
                 let safeName = p.Product_Name.replace(/"/g, '&quot;');
-                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${safeName}")'>
-                            ${safeName} - $${p.Unit_Price}
-                         </div>`;
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${safeName}")'>${safeName} - $${p.Unit_Price}</div>`;
             });
             document.getElementById("results").style.display = "block";
             document.getElementById("results").innerHTML = html;
-        } else {
-             document.getElementById("results").style.display = "none";
-        }
+        } else { document.getElementById("results").style.display = "none"; }
     }
-
     function selectProduct(id, name) {
         if(!id || id === "undefined") { alert("Invalid Product ID"); return; }
         selectedProduct = {id: id.toString(), name: name}; 
@@ -231,7 +209,6 @@
         document.getElementById("selectedName").innerText = name;
         document.getElementById("qtyInput").focus();
     }
-
     function addToCart() {
         let qty = document.getElementById("qtyInput").value;
         if(qty <= 0) return; 
@@ -239,12 +216,10 @@
         renderCart();
         cancelSelection();
     }
-
     function cancelSelection() {
         selectedProduct = null;
         document.getElementById("qtySection").style.display = "none";
     }
-
     function renderCart() {
         let html = "";
         cart.forEach((item, index) => {
@@ -258,63 +233,46 @@
         if(cart.length === 0) { alert("Please add at least one item."); return; }
         if(!dealId) { alert("Error: Deal ID missing. Please refresh."); return; }
 
-        log("Submitting...");
         let btn = document.getElementById("submitBtn");
         btn.disabled = true;
         btn.innerText = "Saving...";
 
         ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
         .then(function(response){
-            
             let currentData = response.data[0];
             let subformApiName = "Phone_Hardware"; 
-            let lookupApiName = "Phone_Selection";
-            let qtyApiName = "Phone_Qty";
-
             let existingRows = currentData[subformApiName]; 
             let finalUpdateList = [];
 
             if(existingRows && existingRows.length > 0){
-                existingRows.forEach(row => {
-                    if(row.id) finalUpdateList.push({ "id": row.id.toString() });
-                });
+                existingRows.forEach(row => { if(row.id) finalUpdateList.push({ "id": row.id.toString() }); });
             }
 
             cart.forEach(item => {
                 let newRow = {};
-                newRow[lookupApiName] = { "id": item.product_id.toString() }; 
-                newRow[qtyApiName] = parseInt(item.quantity);         
+                newRow["Phone_Selection"] = { "id": item.product_id.toString() }; 
+                newRow["Phone_Qty"] = parseInt(item.quantity);         
                 finalUpdateList.push(newRow);
             });
 
-            let updatePayload = {
-                "id": dealId.toString(),
-                [subformApiName]: finalUpdateList
-            };
-
+            let updatePayload = { "id": dealId.toString(), [subformApiName]: finalUpdateList };
             var config = { Entity: "Deals", APIData: updatePayload, Trigger: ["workflow"] };
             
             ZOHO.CRM.API.updateRecord(config)
             .then(function(data){
-                log("Save Success.");
                 document.getElementById("mainInterface").style.display = "none";
                 document.getElementById("successScreen").style.display = "block";
                 setTimeout(function(){ ZOHO.CRM.BLUEPRINT.proceed(); }, 1500);
             })
             .catch(function(err){
-                btn.disabled = false;
-                btn.innerText = "Retry Selection";
+                btn.disabled = false; btn.innerText = "Retry Selection";
                 alert("Save Failed: " + JSON.stringify(err));
-                log("SAVE ERROR: " + JSON.stringify(err));
             });
         })
         .catch(function(fetchErr){
-             btn.disabled = false;
-             alert("Could not fetch existing Deal data.");
-             log("FETCH ERROR: " + JSON.stringify(fetchErr));
+             btn.disabled = false; alert("Could not fetch existing Deal data.");
         });
     }
 </script>
-
 </body>
 </html>
