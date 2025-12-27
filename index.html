@@ -10,12 +10,10 @@
         input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
         button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
         
-        /* Dropdown Styling */
         #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
         .result-item:hover { background-color: #f0f0f0; }
         
-        /* Cart Styling */
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         .footer { margin-top: 30px; text-align: right; }
@@ -58,61 +56,50 @@
 
 <script>
     let cart = [];
-    let masterProductList = []; // Stores the pre-fetched phones
+    let masterProductList = []; 
     let selectedProduct = null;
     let dealId = "";
 
-    // 1. Initialize & Pre-load Data
     ZOHO.embeddedApp.init().then(function(){
-        
-        // Get Deal ID
         ZOHO.embeddedApp.on("PageLoad", function(data){
             dealId = data.EntityId[0];
         });
-
-        // RUN THE QUERY IMMEDIATELY
         fetchTargetProducts();
     });
 
-    // 2. Fetch Specific Products (COQL Query)
     function fetchTargetProducts() {
-        // IMPORTANT: Check your API Names. 
-        // I am assuming 'Product_Category' and 'Hardware_Type' are the API names.
-        // The (%) signs are wildcards for "Contains"
-        
-        let queryStr = "select Product_Name, Unit_Price, id from Products where Product_Category like '%phone%' and Hardware_Type = 'NA'";
+        // CORRECTION MADE HERE: Changed Product_Category to Category
+        // Using 'like' with %phone% to capture "Phone Misc"
+        let queryStr = "select Product_Name, Unit_Price, id from Products where Category like '%phone%' and Hardware_Type = 'NA'";
 
         ZOHO.CRM.API.coql({select_query: queryStr})
         .then(function(data){
             if(data.data){
-                masterProductList = data.data; // Save to global variable
+                masterProductList = data.data;
                 console.log("Loaded " + masterProductList.length + " products.");
+            } else {
+                console.log("Query ran but found 0 products.");
             }
         })
         .catch(function(err){
             console.log("Error fetching products: ", err);
+            // Alert useful for debugging on the tablet if it fails
+            alert("API Error: " + JSON.stringify(err));
         });
     }
 
-    // 3. Show List (On Focus)
     function showAllProducts() {
-        // Show everything in the master list
         renderDropdown(masterProductList);
     }
 
-    // 4. Filter List (On Type)
     function filterLocalProducts() {
         let query = document.getElementById("searchBox").value.toLowerCase();
-        
-        // Filter the existing array (Client side = Instant)
         let filtered = masterProductList.filter(p => 
             p.Product_Name.toLowerCase().includes(query)
         );
-        
         renderDropdown(filtered);
     }
 
-    // 5. Render Dropdown Helper
     function renderDropdown(items) {
         let html = "";
         if(items.length > 0) {
@@ -128,7 +115,6 @@
         }
     }
 
-    // 6. Selection & Cart Logic (Same as before)
     function selectProduct(id, name) {
         selectedProduct = {id: id, name: name};
         document.getElementById("results").style.display = "none";
@@ -179,7 +165,7 @@
         let subformList = [];
         cart.forEach(item => {
             let row = {};
-            // CHECK API NAMES HERE
+            // ENSURE these match the API Names inside your Deal Subform
             row["Product"] = item.product_id; 
             row["Quantity"] = item.quantity;
             subformList.push(row);
@@ -187,7 +173,7 @@
 
         let updateData = {
             "id": dealId,
-            "Draft_Products": subformList 
+            "Draft_Products": subformList // Check this API Name on your Deal
         };
 
         var config = {
