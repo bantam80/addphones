@@ -2,33 +2,39 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - DEBUG MASTER</title>
+    <title>Quote Kiosk - Production</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
         .kiosk-container { max-width: 600px; margin: 0 auto; }
+        
+        /* Input & Buttons */
         input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
         button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
         
+        /* Results Dropdown */
         #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
         .result-item:hover { background-color: #f0f0f0; }
         
-        /* Debug Box Styling */
-        #debugLog { 
-            margin-top: 20px; padding: 10px; background: #ffe6e6; border: 1px solid red; 
-            color: #d8000c; font-family: monospace; font-size: 12px; white-space: pre-wrap; display: block; 
-        }
-
+        /* Tables */
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         .footer { margin-top: 30px; text-align: right; }
+
+        /* The "Thank You" / Processing Screen (Hidden by default) */
+        #successScreen { display: none; text-align: center; margin-top: 50px; }
+        #successScreen h3 { font-size: 24px; color: #28a745; margin-bottom: 10px; }
+        #successScreen p { font-size: 18px; color: #555; }
+        
+        /* Debug Box (Hidden in production unless errors occur) */
+        #debugLog { display:none; margin-top: 20px; padding: 10px; background: #ffe6e6; border: 1px solid red; color: #d8000c; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
     </style>
 </head>
 <body>
 
-<div class="kiosk-container">
-    <h2>Select Hardware (Debug Mode)</h2>
+<div id="mainInterface" class="kiosk-container">
+    <h2>Select Hardware</h2>
     
     <input type="text" id="searchBox" placeholder="Initializing..." 
            onfocus="showAllProducts()" 
@@ -56,45 +62,63 @@
     </table>
 
     <div class="footer">
-        <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Complete Selection</button>
+        <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Loading Deal ID...</button>
     </div>
 
-    <div id="debugLog">Waiting for 3 SDK...</div>
+    <div id="debugLog"></div>
+</div>
+
+<div id="successScreen">
+    <h3>Success!</h3>
+    <p>Hardware saved to Opportunity.</p>
+    <p>Processing Blueprint...</p>
 </div>
 
 <script>
-    // --- GLOBAL VARIABLES ---
+    // --- VARIABLES ---
     let cart = [];
     let masterProductList = []; 
     let selectedProduct = null;
     let dealId = "";
 
     function log(msg) {
-        let d = new Date();
-        let time = d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
         let box = document.getElementById("debugLog");
-        if(box) box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
+        if(box) {
+            box.innerHTML = msg + "\n" + box.innerHTML;
+            if(msg.includes("ERROR")) box.style.display = "block";
+        }
         console.log(msg);
     }
 
     // --- INITIALIZATION ---
     ZOHO.embeddedApp.init().then(function(){
-        log("SDK Initialized.");
+        
         ZOHO.embeddedApp.on("PageLoad", function(data){
+            // 1. CAPTURE DEAL ID ROBUSTLY
             if(data && data.EntityId){
-                dealId = data.EntityId[0];
-                log("Deal ID Captured: " + dealId);
+                if(Array.isArray(data.EntityId)){
+                    dealId = data.EntityId[0];
+                } else {
+                    dealId = data.EntityId;
+                }
+                
+                // 2. UNLOCK THE BUTTON (Prevents "Missing ID" error)
+                let btn = document.getElementById("submitBtn");
+                btn.disabled = false;
+                btn.style.background = "#28a745"; // Turn Green
+                btn.innerText = "Complete Selection";
+            } else {
+                log("ERROR: Widget loaded but EntityId was missing.");
             }
         });
+
         fetchTargetProducts();
     });
 
-    // --- FETCH PRODUCTS ---
     function fetchTargetProducts() {
         let box = document.getElementById("searchBox");
-        box.placeholder = "Loading Products from CRM...";
-        log("Fetching products (Hardware_Type=NA)...");
-
+        box.placeholder = "Loading Products...";
+        
         ZOHO.CRM.API.searchRecord({
             Entity: "Products", 
             Type: "criteria", 
@@ -106,17 +130,13 @@
                 masterProductList = rawList.filter(p => 
                     p.Category != null && p.Category.toLowerCase().includes("phone")
                 );
-                let count = masterProductList.length;
-                log("FILTER SUCCESS: Found " + count + " phones.");
-                box.placeholder = "Tap to view " + count + " phones...";
+                box.placeholder = "Tap to view " + masterProductList.length + " phones...";
             } else {
-                log("Search ran but returned 0 items.");
                 box.placeholder = "No products found.";
             }
         })
         .catch(function(err){
-            let errText = JSON.stringify(err);
-            log("SEARCH ERROR: " + errText);
+            log("SEARCH ERROR: " + JSON.stringify(err));
         });
     }
 
@@ -134,7 +154,6 @@
         if(items.length > 0) {
             items.forEach(p => {
                 let safeName = p.Product_Name.replace(/"/g, '&quot;');
-                // EXPLICIT .toString() ON ID
                 html += `<div class='result-item' onclick='selectProduct("${p.id}", "${safeName}")'>
                             ${safeName} - $${p.Unit_Price}
                          </div>`;
@@ -147,11 +166,7 @@
     }
 
     function selectProduct(id, name) {
-        // ID VALIDATION
-        if(!id || id === "undefined" || id === "null") {
-            alert("Error: Invalid Product ID. Please refresh.");
-            return;
-        }
+        if(!id || id === "undefined") { alert("Invalid Product ID"); return; }
         selectedProduct = {id: id.toString(), name: name}; 
         document.getElementById("results").style.display = "none";
         document.getElementById("searchBox").value = ""; 
@@ -163,12 +178,6 @@
     function addToCart() {
         let qty = document.getElementById("qtyInput").value;
         if(qty <= 0) return; 
-        
-        if(!selectedProduct || !selectedProduct.id) {
-             alert("Error: No product selected.");
-             return;
-        }
-
         cart.push({ product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: qty });
         renderCart();
         cancelSelection();
@@ -187,71 +196,78 @@
         document.getElementById("cartBody").innerHTML = html;
     }
 
-    // --- SUBMIT TO CRM (WITH PAYLOAD DEBUGGER) ---
+    // --- SUBMIT TO CRM ---
     function submitToCRM() {
         if(cart.length === 0) { alert("Please add at least one item."); return; }
         
-        log("Step 1: Fetching existing Deal data...");
+        // Double Check ID
+        if(!dealId) { 
+            alert("Error: Deal ID missing. Please refresh."); 
+            return; 
+        }
+
+        // Lock Button
+        document.getElementById("submitBtn").disabled = true;
+        document.getElementById("submitBtn").innerText = "Saving...";
 
         ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
         .then(function(response){
             
             let currentData = response.data[0];
+            
+            // YOUR CONFIRMED API NAMES
             let subformApiName = "Phone_Hardware"; 
+            let lookupApiName = "Phone_Selection";
+            let qtyApiName = "Phone_Qty";
+
             let existingRows = currentData[subformApiName]; 
             let finalUpdateList = [];
 
             // 1. KEEP EXISTING ROWS
             if(existingRows && existingRows.length > 0){
-                log("Processing " + existingRows.length + " existing rows...");
                 existingRows.forEach(row => {
-                    if(row.id) {
-                        // FORCE STRING ON ID
-                        finalUpdateList.push({ "id": row.id.toString() });
-                    }
+                    if(row.id) finalUpdateList.push({ "id": row.id.toString() });
                 });
             }
 
             // 2. APPEND NEW ITEMS
             cart.forEach(item => {
                 let newRow = {};
-                // FORCE STRING ON PRODUCT ID
-                newRow["Phone_Selection"] = { "id": item.product_id.toString() }; 
-                // FORCE INTEGER ON QTY
-                newRow["Phone_Qty"] = parseInt(item.quantity);         
+                // Force String for ID, Int for Qty
+                newRow[lookupApiName] = { "id": item.product_id.toString() }; 
+                newRow[qtyApiName] = parseInt(item.quantity);         
                 finalUpdateList.push(newRow);
             });
 
-            // 3. CONSTRUCT PAYLOAD
+            // 3. SEND UPDATE
             let updatePayload = {
                 "id": dealId.toString(),
                 [subformApiName]: finalUpdateList
             };
 
-            // --- VISUAL DEBUGGER ---
-            // This alert allows you to see the data before it fails
-            let jsonDebug = JSON.stringify(updatePayload);
-            alert("DEBUG PAYLOAD:\n" + jsonDebug);
-            console.log(jsonDebug);
-            // ---------------------
-
             var config = { Entity: "Deals", APIData: updatePayload, Trigger: ["workflow"] };
-            
-            log("Sending payload...");
             
             ZOHO.CRM.API.updateRecord(config)
             .then(function(data){
-                log("Success!");
-                ZOHO.CRM.BLUEPRINT.proceed();
+                // --- SUCCESS: SHOW THANK YOU SCREEN ---
+                document.getElementById("mainInterface").style.display = "none";
+                document.getElementById("successScreen").style.display = "block";
+
+                // Wait 1.5 seconds, then close Blueprint
+                setTimeout(function(){
+                    ZOHO.CRM.BLUEPRINT.proceed();
+                }, 1500);
             })
             .catch(function(err){
-                let errStr = JSON.stringify(err);
-                log("SAVE ERROR: " + errStr);
-                alert("Save Failed: " + errStr);
+                document.getElementById("submitBtn").disabled = false;
+                document.getElementById("submitBtn").innerText = "Retry Selection";
+                alert("Save Failed: " + JSON.stringify(err));
+                log("SAVE ERROR: " + JSON.stringify(err));
             });
         })
         .catch(function(fetchErr){
-             alert("Could not fetch existing Deal data. " + JSON.stringify(fetchErr));
+             document.getElementById("submitBtn").disabled = false;
+             alert("Could not fetch existing Deal data.");
         });
     }
 </script>
