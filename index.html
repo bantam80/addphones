@@ -5,14 +5,17 @@
     <title>Quote Kiosk</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
-        /* Kiosk Styling: Big fonts, easy touch targets */
         body { font-family: Arial, sans-serif; padding: 20px; }
         .kiosk-container { max-width: 600px; margin: 0 auto; }
         input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
         button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
-        #results { border: 1px solid #ddd; max-height: 200px; overflow-y: auto; display: none; margin-bottom: 20px;}
+        
+        /* Dropdown Styling */
+        #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
         .result-item:hover { background-color: #f0f0f0; }
+        
+        /* Cart Styling */
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         .footer { margin-top: 30px; text-align: right; }
@@ -21,16 +24,20 @@
 <body>
 
 <div class="kiosk-container">
-    <h2>Add Products to Quote</h2>
+    <h2>Select Hardware</h2>
     
-    <input type="text" id="searchBox" placeholder="Search Product Name..." onkeyup="searchProducts()">
+    <input type="text" id="searchBox" placeholder="Tap to view compatible phones..." 
+           onfocus="showAllProducts()" 
+           onkeyup="filterLocalProducts()">
+           
     <div id="results"></div>
 
-    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px;">
-        <h3 id="selectedName"></h3>
-        <input type="number" id="qtyInput" value="1" min="1">
+    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px; border-radius:8px;">
+        <h3 id="selectedName" style="margin-top:0;"></h3>
+        <label>Quantity:</label>
+        <input type="number" id="qtyInput" value="1" min="1" style="width:100px; display:inline-block; margin-right:10px;">
         <button onclick="addToCart()">Add to Cart</button>
-        <button onclick="cancelSelection()" style="background:#666;">Cancel</button>
+        <button onclick="cancelSelection()" style="background:#666; margin-left:10px;">Cancel</button>
     </div>
 
     <table id="cartTable">
@@ -45,48 +52,88 @@
     </table>
 
     <div class="footer">
-        <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Create Quote</button>
+        <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Complete Selection</button>
     </div>
 </div>
 
 <script>
     let cart = [];
+    let masterProductList = []; // Stores the pre-fetched phones
     let selectedProduct = null;
     let dealId = "";
 
-    // 1. Initialize Widget
+    // 1. Initialize & Pre-load Data
     ZOHO.embeddedApp.init().then(function(){
+        
+        // Get Deal ID
         ZOHO.embeddedApp.on("PageLoad", function(data){
-            dealId = data.EntityId[0]; // Capture the Deal ID
+            dealId = data.EntityId[0];
         });
+
+        // RUN THE QUERY IMMEDIATELY
+        fetchTargetProducts();
     });
 
-    // 2. Search Products
-    function searchProducts() {
-        let query = document.getElementById("searchBox").value;
-        if(query.length < 3) return;
+    // 2. Fetch Specific Products (COQL Query)
+    function fetchTargetProducts() {
+        // IMPORTANT: Check your API Names. 
+        // I am assuming 'Product_Category' and 'Hardware_Type' are the API names.
+        // The (%) signs are wildcards for "Contains"
+        
+        let queryStr = "select Product_Name, Unit_Price, id from Products where Product_Category like '%phone%' and Hardware_Type = 'NA'";
 
-        ZOHO.CRM.API.searchRecord({Entity:"Products", Type:"word", Query:query})
+        ZOHO.CRM.API.coql({select_query: queryStr})
         .then(function(data){
-            let html = "";
             if(data.data){
-                data.data.forEach(p => {
-                    // Pass ID and Name to select function
-                    html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>${p.Product_Name} - $${p.Unit_Price}</div>`;
-                });
-                document.getElementById("results").style.display = "block";
-                document.getElementById("results").innerHTML = html;
+                masterProductList = data.data; // Save to global variable
+                console.log("Loaded " + masterProductList.length + " products.");
             }
+        })
+        .catch(function(err){
+            console.log("Error fetching products: ", err);
         });
     }
 
-    // 3. UI Helpers
+    // 3. Show List (On Focus)
+    function showAllProducts() {
+        // Show everything in the master list
+        renderDropdown(masterProductList);
+    }
+
+    // 4. Filter List (On Type)
+    function filterLocalProducts() {
+        let query = document.getElementById("searchBox").value.toLowerCase();
+        
+        // Filter the existing array (Client side = Instant)
+        let filtered = masterProductList.filter(p => 
+            p.Product_Name.toLowerCase().includes(query)
+        );
+        
+        renderDropdown(filtered);
+    }
+
+    // 5. Render Dropdown Helper
+    function renderDropdown(items) {
+        let html = "";
+        if(items.length > 0) {
+            items.forEach(p => {
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name}")'>
+                            ${p.Product_Name} - $${p.Unit_Price}
+                         </div>`;
+            });
+            document.getElementById("results").style.display = "block";
+            document.getElementById("results").innerHTML = html;
+        } else {
+             document.getElementById("results").style.display = "none";
+        }
+    }
+
+    // 6. Selection & Cart Logic (Same as before)
     function selectProduct(id, name) {
         selectedProduct = {id: id, name: name};
         document.getElementById("results").style.display = "none";
-        document.getElementById("searchBox").value = ""; // Clear search
+        document.getElementById("searchBox").value = ""; 
         
-        // Show Qty UI
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
         document.getElementById("qtyInput").focus();
@@ -94,6 +141,8 @@
 
     function addToCart() {
         let qty = document.getElementById("qtyInput").value;
+        if(qty <= 0) return; 
+
         cart.push({
             product_id: selectedProduct.id, 
             product_name: selectedProduct.name, 
@@ -121,19 +170,16 @@
         document.getElementById("cartBody").innerHTML = html;
     }
 
-    // 4. Submit to Deal Subform
     function submitToCRM() {
         if(cart.length === 0) {
-            alert("Cart is empty!");
+            alert("Please add at least one item.");
             return;
         }
 
-        // Format for Zoho Subform: List of Maps
-        // REPLACE 'Draft_Products' with your Subform API Name
-        // REPLACE 'Product' and 'Quantity' with Field API Names inside Subform
         let subformList = [];
         cart.forEach(item => {
             let row = {};
+            // CHECK API NAMES HERE
             row["Product"] = item.product_id; 
             row["Quantity"] = item.quantity;
             subformList.push(row);
@@ -141,19 +187,17 @@
 
         let updateData = {
             "id": dealId,
-            "Draft_Products": subformList // The API Name of the subform on the Deal
+            "Draft_Products": subformList 
         };
 
         var config = {
             Entity: "Deals",
             APIData: updateData,
-            Trigger: ["workflow"] // Ensure workflows trigger if needed
+            Trigger: ["workflow"] 
         };
 
         ZOHO.CRM.API.updateRecord(config)
         .then(function(data){
-            // Success! Now close the widget and move the blueprint forward
-            // This tells the Blueprint to complete the "Generate Quote" transition
             ZOHO.CRM.BLUEPRINT.proceed(); 
         })
         .catch(function(err){
