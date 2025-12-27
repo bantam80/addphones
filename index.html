@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk</title>
+    <title>Quote Kiosk - DEBUG MODE</title>
     <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; }
@@ -14,6 +14,19 @@
         .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
         .result-item:hover { background-color: #f0f0f0; }
         
+        /* Debug Box Styling */
+        #debugLog { 
+            margin-top: 20px; 
+            padding: 10px; 
+            background: #ffe6e6; 
+            border: 1px solid red; 
+            color: #d8000c; 
+            font-family: monospace; 
+            font-size: 12px;
+            white-space: pre-wrap;
+            display: block; 
+        }
+
         table { width: 100%; margin-top: 20px; border-collapse: collapse; }
         th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
         .footer { margin-top: 30px; text-align: right; }
@@ -22,9 +35,9 @@
 <body>
 
 <div class="kiosk-container">
-    <h2>Select Hardware</h2>
+    <h2>Select Hardware (Debug Mode)</h2>
     
-    <input type="text" id="searchBox" placeholder="Tap to view compatible phones..." 
+    <input type="text" id="searchBox" placeholder="Initializing..." 
            onfocus="showAllProducts()" 
            onkeyup="filterLocalProducts()">
            
@@ -52,6 +65,8 @@
     <div class="footer">
         <button onclick="submitToCRM()" style="background: #28a745; width: 100%;">Complete Selection</button>
     </div>
+
+    <div id="debugLog">Waiting for SDK...</div>
 </div>
 
 <script>
@@ -60,31 +75,60 @@
     let selectedProduct = null;
     let dealId = "";
 
+    // Helper to print to the red box
+    function log(msg) {
+        let d = new Date();
+        let time = d.getHours() + ":" + d.getMinutes() + ":" + d.getSeconds();
+        let box = document.getElementById("debugLog");
+        box.innerHTML = `[${time}] ${msg}\n` + box.innerHTML;
+        console.log(msg);
+    }
+
     ZOHO.embeddedApp.init().then(function(){
+        log("SDK Initialized.");
+        alert("Widget Loaded! Starting Fetch..."); // <--- POPUP 1
+        
         ZOHO.embeddedApp.on("PageLoad", function(data){
             dealId = data.EntityId[0];
+            log("Deal ID Captured: " + dealId);
         });
+
         fetchTargetProducts();
     });
 
     function fetchTargetProducts() {
-        // CORRECTION MADE HERE: Changed Product_Category to Category
-        // Using 'like' with %phone% to capture "Phone Misc"
+        document.getElementById("searchBox").placeholder = "Loading Products from CRM...";
+        log("Running COQL Query...");
+
+        // Query
         let queryStr = "select Product_Name, Unit_Price, id from Products where Category like '%phone%' and Hardware_Type = 'NA'";
+        
+        log("Query: " + queryStr);
 
         ZOHO.CRM.API.coql({select_query: queryStr})
         .then(function(data){
             if(data.data){
                 masterProductList = data.data;
-                console.log("Loaded " + masterProductList.length + " products.");
+                let count = masterProductList.length;
+                
+                // Success Feedback
+                log("SUCCESS: Found " + count + " products.");
+                document.getElementById("searchBox").placeholder = "Tap to view " + count + " compatible phones...";
+                alert("Success! Found " + count + " phones."); // <--- POPUP 2
+                
             } else {
-                console.log("Query ran but found 0 products.");
+                // Empty Feedback
+                log("QUERY RAN BUT EMPTY: returned 0 results.");
+                document.getElementById("searchBox").placeholder = "No phones found.";
+                alert("Query finished but found 0 products. Check Debug Log below.");
             }
         })
         .catch(function(err){
-            console.log("Error fetching products: ", err);
-            // Alert useful for debugging on the tablet if it fails
-            alert("API Error: " + JSON.stringify(err));
+            // Error Feedback
+            let errText = JSON.stringify(err);
+            log("CRITICAL ERROR: " + errText);
+            document.getElementById("searchBox").placeholder = "Error! See Log below.";
+            alert("API Error! " + errText); // <--- POPUP 3
         });
     }
 
@@ -161,11 +205,11 @@
             alert("Please add at least one item.");
             return;
         }
+        log("Submitting to CRM...");
 
         let subformList = [];
         cart.forEach(item => {
             let row = {};
-            // ENSURE these match the API Names inside your Deal Subform
             row["Product"] = item.product_id; 
             row["Quantity"] = item.quantity;
             subformList.push(row);
@@ -173,7 +217,7 @@
 
         let updateData = {
             "id": dealId,
-            "Draft_Products": subformList // Check this API Name on your Deal
+            "Draft_Products": subformList 
         };
 
         var config = {
@@ -184,9 +228,12 @@
 
         ZOHO.CRM.API.updateRecord(config)
         .then(function(data){
+            log("CRM Update Success!");
+            alert("Saved! Closing widget...");
             ZOHO.CRM.BLUEPRINT.proceed(); 
         })
         .catch(function(err){
+            log("SAVE ERROR: " + JSON.stringify(err));
             alert("Error saving: " + JSON.stringify(err));
         });
     }
