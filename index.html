@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V2</title>
+    <title>Quote Kiosk - V2.1</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -62,8 +62,8 @@
     </div>
 
     <div class="filter-tabs">
-        <button class="tab-btn active" id="btnPhone" onclick="switchCategory('Phone')">📱 Phones</button>
-        <button class="tab-btn" id="btnOther" onclick="switchCategory('Other')">🖥️ Other Hardware</button>
+        <button class="tab-btn active" id="btnPhone" onclick="switchCategory('Phone')">Phones</button>
+        <button class="tab-btn" id="btnOther" onclick="switchCategory('Other')">Other Hardware</button>
     </div>
 
     <div style="position: relative;">
@@ -133,9 +133,9 @@
     let state = {
         dealId: null,
         cart: [],
-        existingSubform: [], // Stores items already in CRM
-        masterProductList: [], // Current list based on tab
-        activeCategory: 'Phone' // 'Phone' or 'Other'
+        existingSubform: [], 
+        masterProductList: [], 
+        activeCategory: 'Phone' 
     };
 
     /* =======================================================
@@ -147,12 +147,11 @@
             state.dealId = id;
             document.getElementById("statusArea").innerText = "Connected";
             enableButtons(true);
-            loadDealData(); // Fetch Questions & Existing Subform
+            loadDealData(); 
         }
     });
 
     ZOHO.embeddedApp.init().then(function(){
-        // Initial Fetch for Phones
         fetchProducts('Phone');
     });
 
@@ -160,7 +159,7 @@
        2. DATA LOADING (Deal & Products)
        ======================================================= */
     
-    // A. Load Deal Details (Subform + Checkboxes)
+    // A. Load Deal Details
     function loadDealData() {
         document.getElementById("loadingInv").innerText = "(Loading...)";
         
@@ -168,15 +167,13 @@
         .then(function(response){
             let data = response.data[0];
             
-            // 1. Set Checkboxes
             document.getElementById("chk_ethernet").checked = (data.Ethernet_Cabling === "Yes");
             document.getElementById("chk_poe").checked = (data.PoE_Available === "Yes");
 
-            // 2. Set Existing Inventory
             state.existingSubform = [];
             if(data.Phone_Hardware) {
                 state.existingSubform = data.Phone_Hardware.map(row => ({
-                    id: row.id, // Row ID
+                    id: row.id, 
                     product_name: row.Phone_Selection.name,
                     product_id: row.Phone_Selection.id,
                     quantity: row.Phone_Qty
@@ -192,17 +189,12 @@
         document.getElementById("searchBox").placeholder = "Loading " + type + "...";
         document.getElementById("searchBox").value = "";
         
-        // Define Criteria based on Type
-        // Note: For 'not_equal', standard search API criteria usually requires specific syntax. 
-        // If 'not_equal' fails in your specific DC, we may need to fetch all and filter JS.
-        // Trying standard criteria syntax:
-        
+        // --- LOGIC CHANGE HERE ---
         let criteria = "";
         if(type === 'Phone') {
             criteria = "((Hardware_Type:equals:NA))";
         } else {
-            // Using 'not_equal' if supported, otherwise we might fetch a broader range
-            // If this errors, change to a broader search (e.g. Product_Active:true) and filter exclusively in JS
+            // Other Hardware: Type is NOT NA
             criteria = "((Hardware_Type:not_equal:NA))"; 
         }
 
@@ -213,15 +205,15 @@
         })
         .then(function(data){
             if(data.data){
-                // Apply Category Filter Logic requested by user
                 if(type === 'Phone') {
-                    // Filter: Must include 'phone' in Category
+                    // Phone Logic: Must include 'phone' in Category
                     state.masterProductList = data.data.filter(p => p.Category && p.Category.toLowerCase().includes("phone"));
                 } else {
-                    // Filter: Must NOT include 'phone' in Category
-                    state.masterProductList = data.data.filter(p => !p.Category || !p.Category.toLowerCase().includes("phone"));
+                    // Other Hardware Logic: Take EVERYTHING returned by query (Hardware_Type != NA)
+                    // No Category filtering applied.
+                    state.masterProductList = data.data;
                 }
-                document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " " + type + "s...";
+                document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " items...";
             } else {
                 state.masterProductList = [];
                 document.getElementById("searchBox").placeholder = "No products found.";
@@ -234,10 +226,8 @@
        ======================================================= */
     
     function switchCategory(type) {
-        // UI Toggle
         document.getElementById("btnPhone").className = type === 'Phone' ? 'tab-btn active' : 'tab-btn';
         document.getElementById("btnOther").className = type === 'Other' ? 'tab-btn active' : 'tab-btn';
-        
         fetchProducts(type);
     }
 
@@ -332,27 +322,21 @@
        ======================================================= */
     
     function submitData(mode) {
-        // Validation for "Finish" mode
         if(mode === 'advance' && state.cart.length === 0 && state.existingSubform.length === 0) {
             if(!confirm("The deal has no hardware. Are you sure you want to proceed?")) return;
         }
 
         setLoading(true, mode);
 
-        // 1. Prepare Checkbox Data
         let ethVal = document.getElementById("chk_ethernet").checked ? "Yes" : null;
         let poeVal = document.getElementById("chk_poe").checked ? "Yes" : null;
 
-        // 2. Prepare Subform Data
-        // Combine Existing (preserve IDs) + Cart (New items)
         let subformData = [];
         
-        // Add existing rows (only ID needed to update/preserve)
         state.existingSubform.forEach(row => {
             subformData.push({ "id": row.id.toString() });
         });
 
-        // Add Cart items
         state.cart.forEach(item => {
             subformData.push({
                 "Phone_Selection": { "id": item.product_id },
@@ -370,13 +354,11 @@
         ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
         .then(function(data){
             if(mode === 'advance') {
-                // Success -> Advance Blueprint
                 ZOHO.CRM.BLUEPRINT.proceed({ action: "save", data: {} });
             } else {
-                // Success -> Reload Data
-                state.cart = []; // Clear local cart
+                state.cart = []; 
                 renderCart();
-                loadDealData(); // Re-fetch to show new existing items
+                loadDealData(); 
                 setLoading(false, mode);
                 alert("Deal Updated Successfully");
             }
