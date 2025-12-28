@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V2.1</title>
+    <title>Quote Kiosk - V2.2</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -189,36 +189,63 @@
         document.getElementById("searchBox").placeholder = "Loading " + type + "...";
         document.getElementById("searchBox").value = "";
         
-        // --- LOGIC CHANGE HERE ---
-        let criteria = "";
-        if(type === 'Phone') {
-            criteria = "((Hardware_Type:equals:NA))";
-        } else {
-            // Other Hardware: Type is NOT NA
-            criteria = "((Hardware_Type:not_equal:NA))"; 
-        }
+        // CLEAR PREVIOUS RESULTS TO PREVENT CONFUSION
+        state.masterProductList = [];
+        document.getElementById("results").innerHTML = "";
 
-        ZOHO.CRM.API.searchRecord({
-            Entity: "Products", 
-            Type: "criteria", 
-            Query: criteria
-        })
-        .then(function(data){
-            if(data.data){
-                if(type === 'Phone') {
-                    // Phone Logic: Must include 'phone' in Category
+        // --- SPLIT LOGIC ---
+        // CASE 1: PHONES (Use Search API)
+        if(type === 'Phone') {
+            
+            let criteria = "((Hardware_Type:equals:NA))";
+            
+            ZOHO.CRM.API.searchRecord({
+                Entity: "Products", 
+                Type: "criteria", 
+                Query: criteria
+            })
+            .then(function(data){
+                if(data.data){
+                    // Filter: Must include 'phone' in Category
                     state.masterProductList = data.data.filter(p => p.Category && p.Category.toLowerCase().includes("phone"));
+                    updateSearchPlaceholder(type);
                 } else {
-                    // Other Hardware Logic: Take EVERYTHING returned by query (Hardware_Type != NA)
-                    // No Category filtering applied.
-                    state.masterProductList = data.data;
+                    handleNoResults();
                 }
-                document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " items...";
-            } else {
-                state.masterProductList = [];
-                document.getElementById("searchBox").placeholder = "No products found.";
-            }
-        });
+            })
+            .catch(err => { console.error("Phone Fetch Error", err); handleNoResults(); });
+
+        } 
+        // CASE 2: OTHER HARDWARE (Use GetAll API + Client Filter)
+        else {
+            // Cannot use 'not_equal' in Search API.
+            // Workaround: Fetch all products (limit 200) and filter in JS.
+            
+            ZOHO.CRM.API.getAllRecords({
+                Entity: "Products", 
+                sort_order: "asc", 
+                per_page: 200
+            })
+            .then(function(data){
+                if(data.data){
+                    // Filter: Hardware_Type is NOT NA
+                    state.masterProductList = data.data.filter(p => p.Hardware_Type !== "NA");
+                    updateSearchPlaceholder(type);
+                } else {
+                    handleNoResults();
+                }
+            })
+            .catch(err => { console.error("Other Fetch Error", err); handleNoResults(); });
+        }
+    }
+
+    function updateSearchPlaceholder(type) {
+        document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " items...";
+    }
+
+    function handleNoResults() {
+        state.masterProductList = [];
+        document.getElementById("searchBox").placeholder = "No products found.";
     }
 
     /* =======================================================
