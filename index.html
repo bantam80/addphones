@@ -2,223 +2,408 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - Production</title>
+    <title>Quote Kiosk - V2</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .kiosk-container { max-width: 600px; margin: 0 auto; }
+        body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
+        .kiosk-container { max-width: 700px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         
-        input { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; box-sizing: border-box; }
-        button { padding: 15px 30px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; transition: all 0.3s ease; }
-        button:disabled { background-color: #ccc; cursor: not-allowed; opacity: 0.7; }
+        /* -- Header & Tabs -- */
+        h2 { margin-top: 0; color: #333; }
+        .filter-tabs { display: flex; gap: 10px; margin-bottom: 15px; }
+        .tab-btn { flex: 1; padding: 12px; font-size: 16px; cursor: pointer; background: #e9ecef; border: none; border-radius: 5px; font-weight: bold; color: #555; transition: 0.3s; }
+        .tab-btn.active { background: #007bff; color: white; }
+
+        /* -- Search & Inputs -- */
+        input[type="text"], input[type="number"] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         
-        #results { border: 1px solid #ddd; max-height: 300px; overflow-y: auto; display: none; margin-bottom: 20px; background: #fff; }
-        .result-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 18px; }
-        .result-item:hover { background-color: #f0f0f0; }
+        /* -- Search Results Dropdown -- */
+        #results { border: 1px solid #ddd; max-height: 250px; overflow-y: auto; display: none; background: #fff; position: absolute; width: calc(100% - 90px); z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .result-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .result-item:hover { background-color: #f0f8ff; }
+
+        /* -- Qty Selection -- */
+        #qtySection { display: none; background: #e3f2fd; padding: 15px; margin: 15px 0; border-radius: 5px; border: 1px solid #90caf9; }
         
-        table { width: 100%; margin-top: 20px; border-collapse: collapse; }
-        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #ddd; font-size: 18px; }
+        /* -- Tables -- */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { background: #f8f9fa; color: #666; font-size: 14px; text-transform: uppercase; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }
+        td { padding: 10px; border-bottom: 1px solid #eee; font-size: 15px; }
         
-        #statusArea { font-weight: bold; margin-bottom: 10px; color: #555; font-size: 14px; }
-        .status-ok { color: green; }
-        
-        /* Manual ID Box - Fallback */
-        #manualIdArea { background: #fff3cd; padding: 15px; border: 1px solid #ffeeba; margin-bottom: 20px; display:none; }
+        /* -- Questions Section -- */
+        .questions-box { background: #fff3cd; border: 1px solid #ffeeba; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .checkbox-group { display: flex; gap: 20px; align-items: center; margin-top: 5px; }
+        .checkbox-group label { font-size: 16px; cursor: pointer; display: flex; align-items: center; }
+        .checkbox-group input { width: 20px; height: 20px; margin-right: 10px; }
+
+        /* -- Action Buttons -- */
+        .action-bar { display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 2px solid #eee; }
+        .btn-action { padding: 15px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; flex: 1; font-weight: bold; }
+        .btn-update { background: #17a2b8; color: white; }
+        .btn-finish { background: #28a745; color: white; }
+        .btn-action:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* -- Existing Items Section -- */
+        .existing-section { margin-top: 30px; opacity: 0.8; }
+        .existing-section h3 { font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 0; color: #555; }
+        .status-tag { font-size: 12px; color: #888; font-style: italic; float: right; }
+
+        /* -- Utilities -- */
+        .badge-new { background: #28a745; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; }
     </style>
 </head>
 <body>
 
 <div class="kiosk-container">
-    <h2>Add Hardware to Deal</h2>
+    
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>Add Hardware</h2>
+        <div id="statusArea" style="font-size:12px; color:#888;">Initializing...</div>
+    </div>
 
-    <div id="statusArea">Initializing SDK...</div>
+    <div class="filter-tabs">
+        <button class="tab-btn active" id="btnPhone" onclick="switchCategory('Phone')">📱 Phones</button>
+        <button class="tab-btn" id="btnOther" onclick="switchCategory('Other')">🖥️ Other Hardware</button>
+    </div>
 
-    <input type="text" id="searchBox" placeholder="Loading Products..." 
-           onfocus="showAllProducts()" 
-           onkeyup="filterLocalProducts()">  
-    <div id="results"></div>
+    <div style="position: relative;">
+        <input type="text" id="searchBox" placeholder="Loading Products..." 
+               onfocus="showDropdown()" 
+               onkeyup="filterLocalProducts()">
+        <div id="results"></div>
+    </div>
 
-    <div id="qtySection" style="display:none; background:#f9f9f9; padding:15px; margin-bottom:15px; border-radius: 5px;">
+    <div id="qtySection">
         <h3 id="selectedName" style="margin-top:0;"></h3>
         <label>Quantity:</label>
-        <input type="number" id="qtyInput" value="1" min="1" style="width:100px; display:inline-block; margin-right:10px;">
-        <button onclick="addToCart()">Add to Cart</button>
-        <button onclick="cancelSelection()" style="background:#666; margin-left:10px;">Cancel</button>
+        <input type="number" id="qtyInput" value="1" min="1" style="width:80px; display:inline-block; margin-right:10px;">
+        <button onclick="addToCart()" style="padding:10px 20px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer;">Add</button>
+        <button onclick="cancelSelection()" style="padding:10px; background:none; border:none; color:#666; cursor:pointer; text-decoration:underline;">Cancel</button>
     </div>
 
     <table id="cartTable">
         <thead>
             <tr>
-                <th>Product</th>
-                <th>Qty</th>
-                <th>Action</th>
+                <th>Item To Add</th>
+                <th width="50">Qty</th>
+                <th width="50"></th>
             </tr>
         </thead>
-        <tbody id="cartBody"></tbody>
+        <tbody id="cartBody">
+            <tr><td colspan="3" style="text-align:center; color:#999;">Cart is empty</td></tr>
+        </tbody>
     </table>
 
-    <div style="margin-top: 30px; text-align: right;">
-        <button id="submitBtn" onclick="submitToCRM()" style="background: #ccc; width: 100%;" disabled>Waiting for ID...</button>
+    <div class="questions-box">
+        <strong> Installation Requirements:</strong>
+        <div class="checkbox-group">
+            <label title="Field: Ethernet_Cabling">
+                <input type="checkbox" id="chk_ethernet"> Ethernet Cabling?
+            </label>
+            <label title="Field: PoE_Available">
+                <input type="checkbox" id="chk_poe"> PoE Available?
+            </label>
+        </div>
     </div>
 
-    <div id="manualIdArea">
-        <strong>⚠️ Auto-Detect Failed</strong><br>
-        <input type="text" id="manualIdInput" placeholder="Paste Deal ID here">
-        <button onclick="setManualId()">Set ID</button>
+    <div class="action-bar">
+        <button id="btnUpdate" class="btn-action btn-update" onclick="submitData('save')" disabled>Update Deal Only</button>
+        <button id="btnFinish" class="btn-action btn-finish" onclick="submitData('advance')" disabled>Save & Finish</button>
     </div>
+
+    <div class="existing-section">
+        <h3>Current Deal Inventory <span id="loadingInv"></span></h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Qty</th>
+                </tr>
+            </thead>
+            <tbody id="existingBody"></tbody>
+        </table>
+    </div>
+
 </div>
 
 <script>
     /* =======================================================
-       1. CONFIGURATION & STATE
+       STATE MANAGEMENT
        ======================================================= */
-    let cart = [];
-    let masterProductList = []; 
-    let selectedProduct = null;
-    let dealId = ""; 
+    let state = {
+        dealId: null,
+        cart: [],
+        existingSubform: [], // Stores items already in CRM
+        masterProductList: [], // Current list based on tab
+        activeCategory: 'Phone' // 'Phone' or 'Other'
+    };
 
     /* =======================================================
-       2. INITIALIZATION (METHODOLOGY: LISTENER FIRST)
+       1. INITIALIZATION
        ======================================================= */
-    
-    // Define Listener BEFORE Init (Crucial for race conditions)
     ZOHO.embeddedApp.on("PageLoad", function(data){
         if(data && data.EntityId) {
-            let extractedId = data.EntityId;
-            if(Array.isArray(extractedId)) extractedId = extractedId[0];
-            setDealId(extractedId, "Auto-Detected");
+            let id = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+            state.dealId = id;
+            document.getElementById("statusArea").innerText = "Connected";
+            enableButtons(true);
+            loadDealData(); // Fetch Questions & Existing Subform
         }
     });
 
-    // Initialize App
     ZOHO.embeddedApp.init().then(function(){
-        fetchTargetProducts();
+        // Initial Fetch for Phones
+        fetchProducts('Phone');
     });
 
     /* =======================================================
-       3. SUBMISSION LOGIC (METHODOLOGY: CLEAN PROCEED)
+       2. DATA LOADING (Deal & Products)
        ======================================================= */
-    function submitToCRM() {
-        if(cart.length === 0) return alert("Cart is empty.");
-        if(!dealId) return alert("No Deal ID.");
-
-        // A. Visual Feedback (Like Solution Builder)
-        const btn = document.getElementById("submitBtn");
-        btn.innerText = "Saving & Completing...";
-        btn.disabled = true;
-        btn.style.opacity = "0.7";
-
-        // B. Prepare Data
-        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: dealId})
+    
+    // A. Load Deal Details (Subform + Checkboxes)
+    function loadDealData() {
+        document.getElementById("loadingInv").innerText = "(Loading...)";
+        
+        ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: state.dealId})
         .then(function(response){
-            let currentData = response.data[0];
-            let apiNameSubform = "Phone_Hardware";
-            let apiNameLookup = "Phone_Selection";
-            let apiNameQty = "Phone_Qty";
-
-            let updateList = [];
+            let data = response.data[0];
             
-            // Preserve Existing Rows
-            if(currentData[apiNameSubform]) {
-                currentData[apiNameSubform].forEach(row => {
-                    if(row.id) updateList.push({ "id": row.id.toString() });
-                });
+            // 1. Set Checkboxes
+            document.getElementById("chk_ethernet").checked = (data.Ethernet_Cabling === "Yes");
+            document.getElementById("chk_poe").checked = (data.PoE_Available === "Yes");
+
+            // 2. Set Existing Inventory
+            state.existingSubform = [];
+            if(data.Phone_Hardware) {
+                state.existingSubform = data.Phone_Hardware.map(row => ({
+                    id: row.id, // Row ID
+                    product_name: row.Phone_Selection.name,
+                    product_id: row.Phone_Selection.id,
+                    quantity: row.Phone_Qty
+                }));
             }
+            renderExistingItems();
+        });
+    }
 
-            // Append New Rows
-            cart.forEach(item => {
-                let row = {};
-                row[apiNameLookup] = { "id": item.product_id.toString() }; 
-                row[apiNameQty] = parseInt(item.quantity);                 
-                updateList.push(row);
-            });
+    // B. Fetch Products based on Tab
+    function fetchProducts(type) {
+        state.activeCategory = type;
+        document.getElementById("searchBox").placeholder = "Loading " + type + "...";
+        document.getElementById("searchBox").value = "";
+        
+        // Define Criteria based on Type
+        // Note: For 'not_equal', standard search API criteria usually requires specific syntax. 
+        // If 'not_equal' fails in your specific DC, we may need to fetch all and filter JS.
+        // Trying standard criteria syntax:
+        
+        let criteria = "";
+        if(type === 'Phone') {
+            criteria = "((Hardware_Type:equals:NA))";
+        } else {
+            // Using 'not_equal' if supported, otherwise we might fetch a broader range
+            // If this errors, change to a broader search (e.g. Product_Active:true) and filter exclusively in JS
+            criteria = "((Hardware_Type:not_equal:NA))"; 
+        }
 
-            let payload = { "id": dealId, [apiNameSubform]: updateList };
-            
-            // C. Update & Proceed
-            ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
-            .then(function(data){
-                // SUCCESS: NATIVE BLUEPRINT TRANSITION
-                // This closes the widget and moves the Blueprint forward immediately.
-                ZOHO.CRM.BLUEPRINT.proceed({
-                    action: "save",
-                    data: {}
-                });
-            })
-            .catch(function(err){
-                alert("Save Failed: " + JSON.stringify(err));
-                btn.disabled = false;
-                btn.innerText = "Retry Save";
-                btn.style.opacity = "1";
-            });
+        ZOHO.CRM.API.searchRecord({
+            Entity: "Products", 
+            Type: "criteria", 
+            Query: criteria
+        })
+        .then(function(data){
+            if(data.data){
+                // Apply Category Filter Logic requested by user
+                if(type === 'Phone') {
+                    // Filter: Must include 'phone' in Category
+                    state.masterProductList = data.data.filter(p => p.Category && p.Category.toLowerCase().includes("phone"));
+                } else {
+                    // Filter: Must NOT include 'phone' in Category
+                    state.masterProductList = data.data.filter(p => !p.Category || !p.Category.toLowerCase().includes("phone"));
+                }
+                document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " " + type + "s...";
+            } else {
+                state.masterProductList = [];
+                document.getElementById("searchBox").placeholder = "No products found.";
+            }
         });
     }
 
     /* =======================================================
-       4. HELPER FUNCTIONS
+       3. UI INTERACTION
        ======================================================= */
-
-    function setDealId(id, source) {
-        dealId = id;
-        document.getElementById("statusArea").innerHTML = `<span class='status-ok'>✅ Connected to Deal</span>`;
-        document.getElementById("manualIdArea").style.display = "none";
+    
+    function switchCategory(type) {
+        // UI Toggle
+        document.getElementById("btnPhone").className = type === 'Phone' ? 'tab-btn active' : 'tab-btn';
+        document.getElementById("btnOther").className = type === 'Other' ? 'tab-btn active' : 'tab-btn';
         
-        let btn = document.getElementById("submitBtn");
-        btn.disabled = false;
-        btn.style.background = "#28a745";
-        btn.innerText = "Complete Selection";
+        fetchProducts(type);
     }
 
-    function setManualId() {
-        let val = document.getElementById("manualIdInput").value.trim();
-        if(val.length > 5) setDealId(val, "Manual");
+    function showDropdown() {
+        renderDropdown(state.masterProductList);
     }
 
-    function fetchTargetProducts() {
-        ZOHO.CRM.API.searchRecord({
-            Entity: "Products", 
-            Type: "criteria", 
-            Query: "((Hardware_Type:equals:NA))"
-        })
-        .then(function(data){
-            if(data.data){
-                masterProductList = data.data.filter(p => p.Category != null && p.Category.toLowerCase().includes("phone"));
-                document.getElementById("searchBox").placeholder = "Tap to view " + masterProductList.length + " phones...";
-            }
-        });
-    }
-
-    // UI Helpers
-    function showAllProducts() { renderDropdown(masterProductList); }
     function filterLocalProducts() {
         let q = document.getElementById("searchBox").value.toLowerCase();
-        renderDropdown(masterProductList.filter(p => p.Product_Name.toLowerCase().includes(q)));
+        let filtered = state.masterProductList.filter(p => p.Product_Name.toLowerCase().includes(q));
+        renderDropdown(filtered);
     }
+
     function renderDropdown(items) {
         let html = "";
-        items.forEach(p => {
-            html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name.replace(/"/g, '&quot;')}")'>${p.Product_Name}</div>`;
-        });
+        if(items.length === 0) html = "<div class='result-item'>No matches</div>";
+        else {
+            items.forEach(p => {
+                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name.replace(/"/g, '&quot;')}")'>${p.Product_Name}</div>`;
+            });
+        }
         document.getElementById("results").innerHTML = html;
-        document.getElementById("results").style.display = items.length ? "block" : "none";
+        document.getElementById("results").style.display = "block";
     }
+
+    let selectedItem = null;
     function selectProduct(id, name) {
-        selectedProduct = {id:id, name:name};
+        selectedItem = {id: id, name: name};
         document.getElementById("results").style.display = "none";
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
+        document.getElementById("qtyInput").focus();
     }
+
     function addToCart() {
-        cart.push({product_id: selectedProduct.id, product_name: selectedProduct.name, quantity: document.getElementById("qtyInput").value});
+        let qty = document.getElementById("qtyInput").value;
+        state.cart.push({
+            product_id: selectedItem.id,
+            product_name: selectedItem.name,
+            quantity: qty
+        });
+        
         renderCart();
+        cancelSelection();
+        document.getElementById("searchBox").value = "";
+    }
+
+    function cancelSelection() {
         document.getElementById("qtySection").style.display = "none";
+        selectedItem = null;
     }
+
     function renderCart() {
+        let tbody = document.getElementById("cartBody");
+        if(state.cart.length === 0) {
+            tbody.innerHTML = "<tr><td colspan='3' style='text-align:center; color:#999;'>Cart is empty</td></tr>";
+            return;
+        }
         let html = "";
-        cart.forEach(item => html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td></tr>`);
-        document.getElementById("cartBody").innerHTML = html;
+        state.cart.forEach((item, index) => {
+            html += `<tr>
+                <td>${item.product_name} <span class="badge-new">New</span></td>
+                <td>${item.quantity}</td>
+                <td><button onclick="removeFromCart(${index})" style="color:red; background:none; border:none; cursor:pointer;">X</button></td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
     }
-    function cancelSelection() { document.getElementById("qtySection").style.display = "none"; }
+
+    function removeFromCart(index) {
+        state.cart.splice(index, 1);
+        renderCart();
+    }
+
+    function renderExistingItems() {
+        let tbody = document.getElementById("existingBody");
+        document.getElementById("loadingInv").innerText = "";
+        
+        if(state.existingSubform.length === 0) {
+            tbody.innerHTML = "<tr><td colspan='2' style='color:#999;'>No items on Deal yet.</td></tr>";
+            return;
+        }
+        let html = "";
+        state.existingSubform.forEach(item => {
+            html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td></tr>`;
+        });
+        tbody.innerHTML = html;
+    }
+
+    /* =======================================================
+       4. SUBMISSION LOGIC
+       ======================================================= */
+    
+    function submitData(mode) {
+        // Validation for "Finish" mode
+        if(mode === 'advance' && state.cart.length === 0 && state.existingSubform.length === 0) {
+            if(!confirm("The deal has no hardware. Are you sure you want to proceed?")) return;
+        }
+
+        setLoading(true, mode);
+
+        // 1. Prepare Checkbox Data
+        let ethVal = document.getElementById("chk_ethernet").checked ? "Yes" : null;
+        let poeVal = document.getElementById("chk_poe").checked ? "Yes" : null;
+
+        // 2. Prepare Subform Data
+        // Combine Existing (preserve IDs) + Cart (New items)
+        let subformData = [];
+        
+        // Add existing rows (only ID needed to update/preserve)
+        state.existingSubform.forEach(row => {
+            subformData.push({ "id": row.id.toString() });
+        });
+
+        // Add Cart items
+        state.cart.forEach(item => {
+            subformData.push({
+                "Phone_Selection": { "id": item.product_id },
+                "Phone_Qty": item.quantity
+            });
+        });
+
+        let payload = {
+            "id": state.dealId,
+            "Ethernet_Cabling": ethVal,
+            "PoE_Available": poeVal,
+            "Phone_Hardware": subformData
+        };
+
+        ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
+        .then(function(data){
+            if(mode === 'advance') {
+                // Success -> Advance Blueprint
+                ZOHO.CRM.BLUEPRINT.proceed({ action: "save", data: {} });
+            } else {
+                // Success -> Reload Data
+                state.cart = []; // Clear local cart
+                renderCart();
+                loadDealData(); // Re-fetch to show new existing items
+                setLoading(false, mode);
+                alert("Deal Updated Successfully");
+            }
+        })
+        .catch(function(err){
+            alert("Error: " + JSON.stringify(err));
+            setLoading(false, mode);
+        });
+    }
+
+    function enableButtons(enabled) {
+        document.getElementById("btnUpdate").disabled = !enabled;
+        document.getElementById("btnFinish").disabled = !enabled;
+    }
+
+    function setLoading(isLoading, mode) {
+        let btn = (mode === 'save') ? document.getElementById("btnUpdate") : document.getElementById("btnFinish");
+        if(isLoading) {
+            btn.innerText = "Processing...";
+            enableButtons(false);
+        } else {
+            document.getElementById("btnUpdate").innerText = "Update Deal Only";
+            document.getElementById("btnFinish").innerText = "Save & Finish";
+            enableButtons(true);
+        }
+    }
+
 </script>
 
 </body>
