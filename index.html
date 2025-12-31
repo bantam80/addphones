@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V5.0 (Wipe & Replace)</title>
+    <title>Quote Kiosk - V5.1 (Two-Step Clean)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -63,8 +63,8 @@
         .btn-finish { background: #28a745; color: white; }
         .btn-action:disabled { background: #ccc; cursor: not-allowed; }
         
-        .badge-new { background: #28a745; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px; }
-        .badge-old { background: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px; }
+        /* -- Progress Status -- */
+        #progressStatus { display:none; margin-top:10px; text-align:center; font-style:italic; color:#007bff; }
     </style>
 </head>
 <body>
@@ -140,9 +140,10 @@
     </div>
 
     <div class="action-bar">
-        <button id="btnUpdate" class="btn-action btn-update" onclick="submitData('save')" disabled>Update Deal Only</button>
-        <button id="btnFinish" class="btn-action btn-finish" onclick="submitData('advance')" disabled>Save & Finish</button>
+        <button id="btnUpdate" class="btn-action btn-update" onclick="initiateSave('save')" disabled>Update Deal Only</button>
+        <button id="btnFinish" class="btn-action btn-finish" onclick="initiateSave('advance')" disabled>Save & Finish</button>
     </div>
+    <div id="progressStatus"></div>
 
 </div>
 
@@ -153,12 +154,14 @@
     let state = {
         dealId: null,
         
-        // This holds the ORIGINAL rows we found on load. We need these IDs to delete them later.
+        // IDs of rows loaded from database. We use these for the "Purge" step.
         originalRowIds: [], 
 
-        existingSubform: [], // Current view of existing items
+        existingSubform: [], 
         cart: [], 
-        deletedIds: [], // User-requested deletions (tracked for UI only now)
+        
+        // Only used for UI visuals now, since we replace everything on save
+        deletedIds: [], 
         
         masterProductList: [], 
         activeCategory: 'Phone',
@@ -197,7 +200,7 @@
     });
 
     /* =======================================================
-       2. DATA LOADING & STRICT ID FETCHING
+       2. DATA LOADING
        ======================================================= */
     
     function fetchReferenceData() {
@@ -230,13 +233,11 @@
 
             state.existingSubform = [];
             state.deletedIds = []; 
-            state.originalRowIds = []; // Clear original tracking
+            state.originalRowIds = []; // Reset original tracking
 
             if(data.Phone_Hardware) {
                 state.existingSubform = data.Phone_Hardware.map(row => {
-                    // Store the original ID so we can nuke it later
                     state.originalRowIds.push(row.id.toString());
-                    
                     return {
                         row_id: row.id.toString(), 
                         product_name: row.Phone_Selection.name,
@@ -323,7 +324,6 @@
             else if(state.validPhoneIDs.includes(pid)) countPhones += item.quantity;
         });
 
-        // --- POWER CHECK ---
         let poe = document.getElementById("chk_poe").checked;
         let pCard = document.getElementById("cardPower");
         let pStat = document.getElementById("statPower");
@@ -356,7 +356,6 @@
             }
         }
 
-        // --- ATA CHECK ---
         let totalLines = state.metrics.analogLines + state.metrics.pagingQty + state.metrics.faxQty;
         let aCard = document.getElementById("cardATA");
         let aStat = document.getElementById("statATA");
@@ -462,9 +461,6 @@
     }
     function cancelSelection() { document.getElementById("qtySection").style.display = "none"; selectedItem = null; }
 
-    /* =======================================================
-       5. UNIFIED INVENTORY RENDERING
-       ======================================================= */
     function renderInventory() {
         let tbody = document.getElementById("inventoryBody");
         let html = "";
@@ -523,7 +519,6 @@
 
     function deleteExisting(rowId) {
         if(confirm("Delete this item?")) {
-            // Just mark it locally so it disappears from UI
             state.deletedIds.push(rowId.toString());
             renderInventory();
             runComplianceCheck();
@@ -537,81 +532,99 @@
     }
 
     /* =======================================================
-       6. SUBMISSION LOGIC: "WIPE AND REPLACE"
+       6. SUBMISSION LOGIC: TWO-STEP (Delete then Create)
        ======================================================= */
     
-    function submitData(mode) {
-        setLoading(true, mode);
-
+    function initiateSave(mode) {
+        // Step 1: Confirm UI state
+        setLoading(true, mode, "Starting...");
+        
         let ethVal = document.getElementById("chk_ethernet").checked ? "Yes" : null;
         let poeVal = document.getElementById("chk_poe").checked ? "Yes" : null;
 
-        let subformData = [];
-
-        // PHASE 1: DELETE ALL ORIGINALLY LOADED IDS
-        // We explicitly tell Zoho to delete every single ID we found on PageLoad.
-        state.originalRowIds.forEach(id => {
-            subformData.push({ "id": id, "_delete": 1 });
+        // Data for Step 1 (Purge)
+        // We use state.originalRowIds which contains EVERYTHING that was on the deal when we loaded.
+        let deleteSubform = state.originalRowIds.map(id => {
+            return { "id": id, "_delete": null }; // Using standard null for delete
         });
 
-        // PHASE 2: RE-CREATE ALL VALID ITEMS AS NEW ROWS
-        // We iterate over "Existing" (that are not deleted) + "Cart"
-        // and add them as NEW objects (no 'id' field).
+        // Data for Step 2 (Write)
+        let createSubform = [];
         
-        // A. Process Visual "Existing" items (unless user clicked delete)
+        // Add "Existing" items (unless user deleted them)
         state.existingSubform.forEach(item => {
             if(!state.deletedIds.includes(item.row_id.toString())) {
-                subformData.push({ 
+                createSubform.push({ 
                     "Phone_Selection": { "id": item.product_id },
                     "Phone_Qty": item.quantity 
                 }); 
             }
         });
-
-        // B. Process Cart items
+        
+        // Add "Cart" items
         state.cart.forEach(item => {
-            subformData.push({
+            createSubform.push({
                 "Phone_Selection": { "id": item.product_id },
                 "Phone_Qty": item.quantity
             });
         });
 
-        let payload = {
-            "id": state.dealId,
-            "Ethernet_Cabling": ethVal,
-            "PoE_Available": poeVal,
-            "Phone_Hardware": subformData
-        };
-
-        console.log("Wipe & Replace Payload:", JSON.stringify(payload));
-
-        ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
-        .then(function(data){
+        // EXECUTE CHAIN
+        Promise.resolve()
+        .then(() => {
+            // STEP 1: Purge Old Rows (Only if there were old rows)
+            if(deleteSubform.length > 0) {
+                setLoading(true, mode, "Step 1/2: Removing old data...");
+                let payload1 = {
+                    "id": state.dealId,
+                    "Phone_Hardware": deleteSubform
+                };
+                return ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload1 });
+            }
+        })
+        .then(() => {
+            // STEP 2: Write New Rows + Fields
+            setLoading(true, mode, "Step 2/2: Writing new config...");
+            let payload2 = {
+                "id": state.dealId,
+                "Ethernet_Cabling": ethVal,
+                "PoE_Available": poeVal,
+                "Phone_Hardware": createSubform
+            };
+            return ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload2, Trigger: ["workflow"] });
+        })
+        .then((data) => {
             if(mode === 'advance') {
                 ZOHO.CRM.BLUEPRINT.proceed({ action: "save", data: {} });
             } else {
                 state.cart = []; 
+                state.deletedIds = [];
                 loadDealData(); 
                 setLoading(false, mode);
                 document.getElementById("chkOverride").checked = false;
                 alert("Deal Updated Successfully");
             }
         })
-        .catch(function(err){
-            alert("Error: " + JSON.stringify(err));
+        .catch((err) => {
+            alert("Error in save process: " + JSON.stringify(err));
             setLoading(false, mode);
         });
     }
 
-    function setLoading(isLoading, mode) {
+    function setLoading(isLoading, mode, msg) {
         let btn = (mode === 'save') ? document.getElementById("btnUpdate") : document.getElementById("btnFinish");
+        let statusDiv = document.getElementById("progressStatus");
+        
         if(isLoading) {
             btn.innerText = "Processing...";
+            statusDiv.style.display = "block";
+            statusDiv.innerText = msg || "Processing...";
             document.getElementById("btnUpdate").disabled = true;
             document.getElementById("btnFinish").disabled = true;
         } else {
             document.getElementById("btnUpdate").innerText = "Update Deal Only";
             document.getElementById("btnFinish").innerText = "Save & Finish";
+            statusDiv.style.display = "none";
             toggleSaveButtons(); 
         }
     }
