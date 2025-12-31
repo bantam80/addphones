@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V4.4 (PoE Warning)</title>
+    <title>Quote Kiosk - V4.5 (Delete Fix)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -16,7 +16,7 @@
         .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
         .dash-card { padding: 15px; border-radius: 6px; border-left: 5px solid #ccc; background: #f9f9f9; }
         .dash-card.error { border-left-color: #dc3545; background: #fff5f5; }
-        .dash-card.warning { border-left-color: #ffc107; background: #fff3cd; } /* NEW WARNING STYLE */
+        .dash-card.warning { border-left-color: #ffc107; background: #fff3cd; } 
         .dash-card.success { border-left-color: #28a745; background: #f0fff4; }
         .dash-title { font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px; color: #555; }
         .dash-stat { font-size: 13px; color: #666; }
@@ -235,7 +235,7 @@
             
             if(data.Phone_Hardware) {
                 state.existingSubform = data.Phone_Hardware.map(row => ({
-                    row_id: row.id, 
+                    row_id: row.id.toString(), // Ensure String
                     product_name: row.Phone_Selection.name,
                     product_id: row.Phone_Selection.id,
                     quantity: parseInt(row.Phone_Qty) || 0,
@@ -523,7 +523,8 @@
 
     function deleteExisting(rowId) {
         if(confirm("Delete this item?")) {
-            state.deletedIds.push(rowId);
+            // Ensure we store as String to match API types
+            state.deletedIds.push(rowId.toString());
             renderInventory();
             runComplianceCheck();
         }
@@ -536,7 +537,7 @@
     }
 
     /* =======================================================
-       6. SUBMISSION LOGIC
+       6. SUBMISSION LOGIC (Fix: Use _delete:1)
        ======================================================= */
     
     function submitData(mode) {
@@ -547,12 +548,14 @@
 
         let subformData = [];
 
+        // 1. DELETIONS (Use 1 instead of null to prevent stripping)
         state.deletedIds.forEach(id => {
-            subformData.push({ "id": id, "_delete": null });
+            subformData.push({ "id": id.toString(), "_delete": 1 });
         });
 
+        // 2. EXISTING UPDATES (Ensure ID is not in deleted list)
         state.existingSubform.forEach(item => {
-            if(!state.deletedIds.includes(item.row_id)) {
+            if(!state.deletedIds.includes(item.row_id.toString())) {
                 subformData.push({ 
                     "id": item.row_id,
                     "Phone_Qty": item.quantity 
@@ -560,6 +563,7 @@
             }
         });
 
+        // 3. NEW CART ITEMS
         state.cart.forEach(item => {
             subformData.push({
                 "Phone_Selection": { "id": item.product_id },
@@ -573,6 +577,9 @@
             "PoE_Available": poeVal,
             "Phone_Hardware": subformData
         };
+        
+        // Debugging Payload
+        console.log("Submitting Payload:", JSON.stringify(payload));
 
         ZOHO.CRM.API.updateRecord({ Entity: "Deals", APIData: payload, Trigger: ["workflow"] })
         .then(function(data){
