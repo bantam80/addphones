@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V4.3 (Strict Classification)</title>
+    <title>Quote Kiosk - V4.4 (PoE Warning)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -16,6 +16,7 @@
         .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
         .dash-card { padding: 15px; border-radius: 6px; border-left: 5px solid #ccc; background: #f9f9f9; }
         .dash-card.error { border-left-color: #dc3545; background: #fff5f5; }
+        .dash-card.warning { border-left-color: #ffc107; background: #fff3cd; } /* NEW WARNING STYLE */
         .dash-card.success { border-left-color: #28a745; background: #f0fff4; }
         .dash-title { font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px; color: #555; }
         .dash-stat { font-size: 13px; color: #666; }
@@ -160,9 +161,9 @@
         activeCategory: 'Phone',
 
         // Whitelists (Strict IDs)
-        validPowerIDs: [], // Hardware Type = "Power Supply"
-        validATAIDs: [],   // Category = "ATA"
-        validPhoneIDs: [], // Category contains "Phone"
+        validPowerIDs: [], 
+        validATAIDs: [],   
+        validPhoneIDs: [], 
         
         referenceLoaded: false,
         
@@ -191,50 +192,27 @@
 
     ZOHO.embeddedApp.init().then(function(){
         fetchProducts('Phone'); 
-        fetchReferenceData(); // Start Strict Logic Load
+        fetchReferenceData(); 
     });
 
     /* =======================================================
        2. DATA LOADING & STRICT ID FETCHING
        ======================================================= */
     
-    // FETCH 3 SPECIFIC LISTS TO BUILD THE LOGIC BRAIN
     function fetchReferenceData() {
         // 1. Get POWER SUPPLY Items
         let p1 = ZOHO.CRM.API.searchRecord({ Entity: "Products", Type: "criteria", Query: "((Hardware_Type:equals:Power Supply))" });
-        
-        // 2. Get ATAs (Using Category Search if possible, else GetAll)
-        // Note: 'ATA' is short, usually safe to search as word. 
-        // If your Category is a picklist, we use :equals:.
+        // 2. Get ATAs
         let p2 = ZOHO.CRM.API.searchRecord({ Entity: "Products", Type: "criteria", Query: "((Category:equals:ATA))" });
-
-        // 3. Get PHONES (Category starts with Phone)
+        // 3. Get PHONES
         let p3 = ZOHO.CRM.API.searchRecord({ Entity: "Products", Type: "criteria", Query: "((Category:starts_with:Phone))" });
 
         Promise.all([p1, p2, p3]).then(values => {
-            
-            // PROCESS POWER LIST
-            if(values[0] && values[0].data) {
-                values[0].data.forEach(p => state.validPowerIDs.push(p.id));
-            }
-
-            // PROCESS ATA LIST
-            if(values[1] && values[1].data) {
-                values[1].data.forEach(p => state.validATAIDs.push(p.id));
-            }
-
-            // PROCESS PHONE LIST
-            if(values[2] && values[2].data) {
-                values[2].data.forEach(p => state.validPhoneIDs.push(p.id));
-            }
+            if(values[0] && values[0].data) values[0].data.forEach(p => state.validPowerIDs.push(p.id));
+            if(values[1] && values[1].data) values[1].data.forEach(p => state.validATAIDs.push(p.id));
+            if(values[2] && values[2].data) values[2].data.forEach(p => state.validPhoneIDs.push(p.id));
 
             state.referenceLoaded = true;
-            console.log("Logic Loaded.", 
-                "Power:", state.validPowerIDs.length, 
-                "ATA:", state.validATAIDs.length, 
-                "Phone:", state.validPhoneIDs.length
-            );
-            
             runComplianceCheck();
         });
     }
@@ -270,7 +248,6 @@
         });
     }
 
-    // UI Search Logic (Separate from Logic Brain)
     function fetchProducts(type) {
         state.activeCategory = type;
         document.getElementById("searchBox").placeholder = "Loading " + type + "...";
@@ -283,7 +260,6 @@
             .then(processResults).catch(handleErr);
         } 
         else if (type === 'ATA') {
-             // For UI, we grab 200 ATAs. (User might want to pick one not found in strict search?)
              ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
             .then(function(data){
                 if(data.data) {
@@ -338,23 +314,10 @@
         allItems.forEach(item => {
             let pid = item.product_id;
             
-            // PRIORITY 1: Is it a Power Cord? (Hardware Type = Power Supply)
-            if(state.validPowerIDs.includes(pid)) {
-                countCords += item.quantity;
-            }
-            // PRIORITY 2: Is it an ATA? (Category = ATA)
-            else if(state.validATAIDs.includes(pid)) {
-                countATAs += item.quantity;
-            }
-            // PRIORITY 3: Is it a Phone? (Category starts with Phone)
-            else if(state.validPhoneIDs.includes(pid)) {
-                countPhones += item.quantity;
-            }
-            else {
-                // Item is unknown (e.g. random mounting bracket).
-                // DO NOT count as Phone.
-                console.log("Unclassified item ignored by math:", item.product_name);
-            }
+            if(state.validPowerIDs.includes(pid)) countCords += item.quantity;
+            else if(state.validATAIDs.includes(pid)) countATAs += item.quantity;
+            else if(state.validPhoneIDs.includes(pid)) countPhones += item.quantity;
+            else console.log("Unclassified item:", item.product_name);
         });
 
         // --- POWER CHECK ---
@@ -362,20 +325,35 @@
         let pCard = document.getElementById("cardPower");
         let pStat = document.getElementById("statPower");
         
-        if(!poe && countPhones > 0) {
-            if(countCords < countPhones) {
-                state.isPowerCompliant = false;
-                pCard.className = "dash-card error";
-                pStat.innerHTML = `⚠️ <b>Mismatch:</b> ${countPhones} Phones vs ${countCords} Power Cords.<br>(Hardware Type 'Power Supply' required)`;
+        if(!poe) {
+            // PoE OFF: Need Cords
+            if(countPhones > 0) {
+                if(countCords < countPhones) {
+                    state.isPowerCompliant = false;
+                    pCard.className = "dash-card error";
+                    pStat.innerHTML = `⚠️ <b>Mismatch:</b> ${countPhones} Phones vs ${countCords} Valid Cords.<br>(Hardware Type 'Power Supply' required)`;
+                } else {
+                    state.isPowerCompliant = true;
+                    pCard.className = "dash-card success";
+                    pStat.innerHTML = `✅ <b>OK:</b> ${countPhones} Phones, ${countCords} Cords.`;
+                }
+            } else {
+                 state.isPowerCompliant = true;
+                 pCard.className = "dash-card success";
+                 pStat.innerHTML = `✅ <b>OK:</b> No phones configured.`;
+            }
+        } else {
+            // PoE ON: Should NOT have Cords (or Warning)
+            if(countCords > 0) {
+                // Warning Logic: Forces Override check
+                state.isPowerCompliant = false; 
+                pCard.className = "dash-card warning"; 
+                pStat.innerHTML = `⚠️ <b>PoE Selected:</b><br>You have ${countCords} Power Cords in cart.<br>Do you need these? (Verify)`;
             } else {
                 state.isPowerCompliant = true;
                 pCard.className = "dash-card success";
-                pStat.innerHTML = `✅ <b>OK:</b> ${countPhones} Phones, ${countCords} Cords.`;
+                pStat.innerHTML = `✅ <b>OK:</b> PoE is Available.`;
             }
-        } else {
-            state.isPowerCompliant = true;
-            pCard.className = "dash-card success";
-            pStat.innerHTML = poe ? `✅ <b>OK:</b> PoE is Available.` : `✅ <b>OK:</b> No phones configured.`;
         }
 
         // --- ATA CHECK ---
@@ -558,7 +536,7 @@
     }
 
     /* =======================================================
-       6. SUBMISSION LOGIC (Updated for Edits)
+       6. SUBMISSION LOGIC
        ======================================================= */
     
     function submitData(mode) {
