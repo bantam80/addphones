@@ -2,28 +2,39 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V3.5 (Merge & Logic Fix)</title>
+    <title>Quote Kiosk - V4.1 (Strict Type Logic)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
-        .kiosk-container { max-width: 800px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .kiosk-container { max-width: 850px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         
-        /* -- Header & Tabs -- */
+        /* -- Header -- */
         h2 { margin-top: 0; color: #333; }
+        .header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px; }
+        
+        /* -- Logic Dashboard -- */
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .dash-card { padding: 15px; border-radius: 6px; border-left: 5px solid #ccc; background: #f9f9f9; }
+        .dash-card.error { border-left-color: #dc3545; background: #fff5f5; }
+        .dash-card.success { border-left-color: #28a745; background: #f0fff4; }
+        .dash-title { font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px; color: #555; }
+        .dash-stat { font-size: 13px; color: #666; }
+        
+        /* -- Override Section -- */
+        #overrideSection { background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 10px; margin-bottom: 15px; border-radius: 4px; display: none; }
+        #overrideSection label { font-weight: bold; cursor: pointer; }
+
+        /* -- Tabs -- */
         .filter-tabs { display: flex; gap: 10px; margin-bottom: 15px; }
-        .tab-btn { flex: 1; padding: 12px; font-size: 16px; cursor: pointer; background: #e9ecef; border: none; border-radius: 5px; font-weight: bold; color: #555; transition: 0.3s; }
+        .tab-btn { flex: 1; padding: 10px; font-size: 15px; cursor: pointer; background: #e9ecef; border: none; border-radius: 5px; font-weight: bold; color: #555; transition: 0.3s; }
         .tab-btn.active { background: #007bff; color: white; }
 
-        /* -- System Messages -- */
-        .system-alert { background: #fff3cd; color: #856404; padding: 15px; border-radius: 4px; border: 1px solid #ffeeba; margin-bottom: 15px; display:none; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-        .alert-btn { background: #856404; color: white; border: none; padding: 5px 10px; margin-left: 10px; cursor: pointer; border-radius: 3px; font-size: 12px; }
-
-        /* -- Search & Inputs -- */
-        input[type="text"], input[type="number"] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        /* -- Inputs -- */
+        input[type="text"], input[type="number"] { width: 100%; padding: 10px; font-size: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         
-        /* -- Search Results Dropdown -- */
+        /* -- Search Results -- */
         #results { border: 1px solid #ddd; max-height: 250px; overflow-y: auto; display: none; background: #fff; position: absolute; width: calc(100% - 90px); z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .result-item { padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .result-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
         .result-item:hover { background-color: #f0f8ff; }
 
         /* -- Qty Selection -- */
@@ -31,41 +42,52 @@
         
         /* -- Tables -- */
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { background: #f8f9fa; color: #666; font-size: 14px; text-transform: uppercase; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }
-        td { padding: 10px; border-bottom: 1px solid #eee; font-size: 15px; }
+        th { background: #f8f9fa; color: #666; font-size: 13px; text-transform: uppercase; padding: 8px; text-align: left; border-bottom: 2px solid #ddd; }
+        td { padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: middle; }
+        .btn-del { color: #dc3545; background: none; border: 1px solid #dc3545; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+        .btn-del:hover { background: #dc3545; color: white; }
         
-        /* -- Questions Section -- */
-        .questions-box { background: #e9ecef; border: 1px solid #ced4da; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        .checkbox-group { display: flex; gap: 20px; align-items: center; margin-top: 5px; }
-        .checkbox-group label { font-size: 16px; cursor: pointer; display: flex; align-items: center; }
-        .checkbox-group input { width: 20px; height: 20px; margin-right: 10px; }
+        /* -- Requirements -- */
+        .questions-box { background: #e9ecef; border: 1px solid #ced4da; padding: 10px; border-radius: 5px; margin: 20px 0; display:flex; gap: 20px; align-items: center;}
+        .questions-box label { cursor: pointer; font-weight: 500; }
 
-        /* -- Action Buttons -- */
+        /* -- Action Bar -- */
         .action-bar { display: flex; gap: 10px; margin-top: 20px; padding-top: 20px; border-top: 2px solid #eee; }
         .btn-action { padding: 15px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; flex: 1; font-weight: bold; }
         .btn-update { background: #17a2b8; color: white; }
         .btn-finish { background: #28a745; color: white; }
         .btn-action:disabled { background: #ccc; cursor: not-allowed; }
-
-        /* -- Existing Items Section -- */
-        .existing-section { margin-top: 30px; opacity: 0.8; }
-        .existing-section h3 { font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 0; color: #555; }
-
-        /* -- Utilities -- */
-        .badge-new { background: #28a745; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; }
-        .badge-auto { background: #ffc107; color: #333; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 5px; font-weight: bold; }
+        
+        .badge-new { background: #28a745; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px; }
+        .badge-old { background: #6c757d; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 5px; }
     </style>
 </head>
 <body>
 
 <div class="kiosk-container">
     
-    <div style="display:flex; justify-content:space-between; align-items:center;">
+    <div class="header-row">
         <h2>Solution Configurator</h2>
         <div id="statusArea" style="font-size:12px; color:#888;">Initializing...</div>
     </div>
 
-    <div id="logicAlert" class="system-alert"></div>
+    <div class="dashboard">
+        <div class="dash-card" id="cardPower">
+            <span class="dash-title">🔌 Power Supply Check</span>
+            <div class="dash-stat" id="statPower">Calculating...</div>
+        </div>
+        <div class="dash-card" id="cardATA">
+            <span class="dash-title">📟 ATA / Analog Check</span>
+            <div class="dash-stat" id="statATA">Calculating...</div>
+        </div>
+    </div>
+
+    <div id="overrideSection">
+        <label>
+            <input type="checkbox" id="chkOverride" onchange="toggleSaveButtons()"> 
+            ⚠️ I certify that I have verified the hardware quantities manually. (Override Warnings)
+        </label>
+    </div>
 
     <div class="filter-tabs">
         <button class="tab-btn active" id="btnPhone" onclick="switchCategory('Phone')">Phones</button>
@@ -88,47 +110,33 @@
         <button onclick="cancelSelection()" style="padding:10px; background:none; border:none; color:#666; cursor:pointer; text-decoration:underline;">Cancel</button>
     </div>
 
-    <table id="cartTable">
+    <h3 style="margin-bottom:5px; color:#555;">Inventory Configuration</h3>
+    <table id="mainTable">
         <thead>
             <tr>
-                <th>Item To Add</th>
-                <th width="50">Qty</th>
-                <th width="50"></th>
+                <th>Product</th>
+                <th width="80">Qty</th>
+                <th width="80">Action</th>
             </tr>
         </thead>
-        <tbody id="cartBody">
-            <tr><td colspan="3" style="text-align:center; color:#999;">Cart is empty</td></tr>
+        <tbody id="inventoryBody">
+            <tr><td colspan="3" style="text-align:center; color:#999;">Loading...</td></tr>
         </tbody>
     </table>
 
     <div class="questions-box">
-        <strong> Installation Requirements:</strong>
-        <div class="checkbox-group">
-            <label title="Field: Ethernet_Cabling">
-                <input type="checkbox" id="chk_ethernet"> Ethernet Cabling?
-            </label>
-            <label title="Field: PoE_Available">
-                <input type="checkbox" id="chk_poe" onchange="runComplianceCheck()"> PoE Available?
-            </label>
-        </div>
+        <strong> Settings:</strong>
+        <label title="Field: Ethernet_Cabling">
+            <input type="checkbox" id="chk_ethernet"> Ethernet Cabling
+        </label>
+        <label title="Field: PoE_Available">
+            <input type="checkbox" id="chk_poe" onchange="runComplianceCheck()"> PoE Available
+        </label>
     </div>
 
     <div class="action-bar">
         <button id="btnUpdate" class="btn-action btn-update" onclick="submitData('save')" disabled>Update Deal Only</button>
         <button id="btnFinish" class="btn-action btn-finish" onclick="submitData('advance')" disabled>Save & Finish</button>
-    </div>
-
-    <div class="existing-section">
-        <h3>Current Deal Inventory <span id="loadingInv"></span></h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Product</th>
-                    <th>Qty</th>
-                </tr>
-            </thead>
-            <tbody id="existingBody"></tbody>
-        </table>
     </div>
 
 </div>
@@ -139,16 +147,25 @@
        ======================================================= */
     let state = {
         dealId: null,
-        cart: [],
+        
+        // Lists
         existingSubform: [], 
+        cart: [], 
+        deletedIds: [], 
+        
         masterProductList: [], 
         activeCategory: 'Phone',
+
+        // Whitelists (IDs) for Strict Type Checking
+        validPowerIDs: [],
+        validATAIDs: [],
+        referenceLoaded: false,
         
-        // System Data for Logic
-        defaultPowerSupply: null, 
-        defaultATA: null,         
-        
-        // Deal Metrics for Logic
+        // Compliance Flags
+        isPowerCompliant: true,
+        isATACompliant: true,
+
+        // Metrics
         metrics: {
             analogLines: 0,
             pagingQty: 0,
@@ -165,34 +182,43 @@
             let id = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
             state.dealId = id;
             document.getElementById("statusArea").innerText = "Connected";
-            enableButtons(true);
             loadDealData(); 
         }
     });
 
     ZOHO.embeddedApp.init().then(function(){
         fetchProducts('Phone'); 
-        fetchSystemHardware();  
+        fetchReferenceData(); // Load Whitelists
     });
 
     /* =======================================================
        2. DATA LOADING
        ======================================================= */
     
-    function fetchSystemHardware() {
-        ZOHO.CRM.API.getAllRecords({ Entity: "Products", sort_order: "asc", per_page: 200 })
+    // FETCH WHITELISTS (Strict Logic Source)
+    function fetchReferenceData() {
+        // Fetch ALL products (limit 200) to find official Power Cords & ATAs
+        ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
         .then(function(data){
-            if(data.data){
-                state.defaultPowerSupply = data.data.find(p => p.Hardware_Type === "Power Supply");
-                state.defaultATA = data.data.find(p => p.Category === "ATA");
-                console.log("System Hardware Loaded");
+            if(data.data) {
+                data.data.forEach(p => {
+                    // STRICT CHECK 1: Power Cords
+                    if(p.Hardware_Type === "Power Cords") {
+                        state.validPowerIDs.push(p.id);
+                    }
+                    // STRICT CHECK 2: ATAs
+                    if(p.Category === "ATA") {
+                        state.validATAIDs.push(p.id);
+                    }
+                });
+                state.referenceLoaded = true;
+                console.log("Reference Data Loaded. Cords:", state.validPowerIDs.length, "ATAs:", state.validATAIDs.length);
+                runComplianceCheck(); // Re-run in case Deal loaded first
             }
         });
     }
 
     function loadDealData() {
-        document.getElementById("loadingInv").innerText = "(Loading...)";
-        
         ZOHO.CRM.API.getRecord({Entity: "Deals", RecordID: state.dealId})
         .then(function(response){
             let data = response.data[0];
@@ -206,15 +232,19 @@
             state.metrics.e911Locs = parseInt(data.E911_Locations) || 1; 
 
             state.existingSubform = [];
+            state.deletedIds = []; 
+            
             if(data.Phone_Hardware) {
                 state.existingSubform = data.Phone_Hardware.map(row => ({
-                    id: row.id, 
+                    row_id: row.id, 
                     product_name: row.Phone_Selection.name,
                     product_id: row.Phone_Selection.id,
-                    quantity: parseInt(row.Phone_Qty) || 0
+                    quantity: parseInt(row.Phone_Qty) || 0,
+                    source: 'existing'
                 }));
             }
-            renderExistingItems();
+            
+            renderInventory();
             runComplianceCheck(); 
         });
     }
@@ -223,7 +253,6 @@
         state.activeCategory = type;
         document.getElementById("searchBox").placeholder = "Loading " + type + "...";
         document.getElementById("searchBox").value = "";
-        
         state.masterProductList = [];
         document.getElementById("results").innerHTML = "";
 
@@ -232,6 +261,7 @@
             .then(processResults).catch(handleErr);
         } 
         else if (type === 'ATA') {
+             // We can use the reference list if fully loaded, but Search is safer for partial loads
              ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
             .then(function(data){
                 if(data.data) {
@@ -263,138 +293,122 @@
             handleNoResults();
         }
     }
-
     function handleErr(err) { console.error(err); handleNoResults(); }
-    
-    function updateSearchPlaceholder() {
-        document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " items...";
-    }
-
-    function handleNoResults() {
-        state.masterProductList = [];
-        document.getElementById("searchBox").placeholder = "No products found.";
-    }
+    function updateSearchPlaceholder() { document.getElementById("searchBox").placeholder = "Search " + state.masterProductList.length + " items..."; }
+    function handleNoResults() { state.masterProductList = []; document.getElementById("searchBox").placeholder = "No products found."; }
 
     /* =======================================================
-       3. COMPLIANCE ENGINE (Refined)
+       3. LOGIC ENGINE (STRICT ID MATCHING)
        ======================================================= */
     
     function runComplianceCheck() {
-        let alerts = [];
-        let didAutoAdd = false;
-
-        // --- Helper: Count Total Qty of a specific product type in Cart + Existing ---
-        function countHardware(filterFn) {
-            let inCart = state.cart.reduce((sum, item) => filterFn(item.product_name) ? sum + parseInt(item.quantity) : sum, 0);
-            let inExisting = state.existingSubform.reduce((sum, item) => filterFn(item.product_name) ? sum + parseInt(item.quantity) : sum, 0);
-            return { total: inCart + inExisting, cartVal: inCart, existVal: inExisting };
+        if(!state.referenceLoaded) {
+            document.getElementById("statPower").innerText = "Loading Reference Data...";
+            return; 
         }
 
-        // --- A. POWER SUPPLY LOGIC ---
-        // Definition of a phone: Not Power Supply, Not ATA.
-        let isPhone = (name) => {
-            let n = name.toLowerCase();
-            return !n.includes("power") && !n.includes("ata"); 
-        };
+        let allItems = getAllActiveItems(); 
         
-        let phoneCounts = countHardware(isPhone);
-        let poeAvailable = document.getElementById("chk_poe").checked;
+        // --- 1. CLASSIFY ITEMS BY ID ---
+        let countPhones = 0; 
+        let countCords = 0;
+        let countATAs = 0;
 
-        if(!poeAvailable && phoneCounts.total > 0) {
-            if(state.defaultPowerSupply) {
-                let psuName = state.defaultPowerSupply.Product_Name;
-                let psuId = state.defaultPowerSupply.id;
-                
-                // Count current PSUs
-                let psuCounts = countHardware((name) => name.includes(psuName) || name.toLowerCase().includes("power supply"));
-                
-                if(psuCounts.total < phoneCounts.total) {
-                    // Logic: We only add to Cart what is missing.
-                    let deficit = phoneCounts.total - psuCounts.total;
-                    
-                    // Add deficit to cart
-                    let currentCartPSU = state.cart.find(i => i.product_id === psuId);
-                    let newCartQty = (currentCartPSU ? parseInt(currentCartPSU.quantity) : 0) + deficit;
-                    
-                    upsertCartItem(psuId, psuName, newCartQty, true);
-                    didAutoAdd = true;
-                    
-                    alerts.push(`⚠️ <strong>Power Supply Check:</strong>\n${phoneCounts.total} phones in quote. (Existing: ${phoneCounts.existVal}, Cart: ${phoneCounts.cartVal}).\nEnforced ${phoneCounts.total} Power Cords. <button class="alert-btn" onclick="editPowerSupply()">Edit</button>`);
-                } else {
-                     alerts.push(`✅ <strong>Power Supply Check:</strong>\n${phoneCounts.total} phones require power. ${psuCounts.total} Power Cords present.`);
-                }
+        allItems.forEach(item => {
+            if(state.validPowerIDs.includes(item.product_id)) {
+                countCords += item.quantity;
             }
-        }
+            else if(state.validATAIDs.includes(item.product_id)) {
+                countATAs += item.quantity;
+            }
+            else {
+                // Assumption: If it's not a known Power Cord or ATA, it's a Phone/Device
+                countPhones += item.quantity;
+            }
+        });
 
-        // --- B. ATA LOGIC ---
-        let totalLines = state.metrics.analogLines + state.metrics.pagingQty + state.metrics.faxQty;
+        // --- 2. POWER CHECK ---
+        let poe = document.getElementById("chk_poe").checked;
+        let pCard = document.getElementById("cardPower");
+        let pStat = document.getElementById("statPower");
         
-        if(totalLines > 0) {
-            // Rule: Max of (Ports Needed) vs (Locations Needed)
-            let portNeeded = Math.ceil(totalLines / 2);
-            let locNeeded = Math.min(totalLines, state.metrics.e911Locs);
-            let requiredATAs = Math.max(portNeeded, locNeeded);
-
-            // Count ATAs in System (Cart + Existing)
-            let ataCounts = countHardware((name) => name.toUpperCase().includes("ATA"));
-            
-            if(ataCounts.total < requiredATAs) {
-                if(state.defaultATA) {
-                    let deficit = requiredATAs - ataCounts.total;
-                    let currentCartATA = state.cart.find(i => i.product_id === state.defaultATA.id);
-                    let newCartQty = (currentCartATA ? parseInt(currentCartATA.quantity) : 0) + deficit;
-
-                    upsertCartItem(state.defaultATA.id, state.defaultATA.Product_Name, newCartQty, true);
-                    didAutoAdd = true;
-
-                    alerts.push(`⚠️ <strong>ATA Logic:</strong>\nCustomer has ${totalLines} analog ports & ${state.metrics.e911Locs} Locations.\nCalculated Requirement: ${requiredATAs} Devices.\n(Existing: ${ataCounts.existVal}, Auto-Added: ${deficit}).`);
-                }
+        if(!poe && countPhones > 0) {
+            if(countCords < countPhones) {
+                state.isPowerCompliant = false;
+                pCard.className = "dash-card error";
+                pStat.innerHTML = `⚠️ <b>Mismatch:</b> ${countPhones} Phones vs ${countCords} Valid Cords.<br>Type "Power Cords" required.`;
             } else {
-                 alerts.push(`✅ <strong>ATA Logic:</strong>\nRequirement met. ${totalLines} Lines / ${state.metrics.e911Locs} Locs. ${ataCounts.total} ATAs configured.`);
+                state.isPowerCompliant = true;
+                pCard.className = "dash-card success";
+                pStat.innerHTML = `✅ <b>OK:</b> ${countPhones} Phones, ${countCords} Cords.`;
             }
-        }
-
-        // Render Alerts
-        let alertBox = document.getElementById("logicAlert");
-        if(alerts.length > 0) {
-            alertBox.innerHTML = alerts.join("<br><hr style='margin:10px 0; border:0; border-top:1px solid #e3c081;'>");
-            alertBox.style.display = "block";
         } else {
-            alertBox.style.display = "none";
+            state.isPowerCompliant = true;
+            pCard.className = "dash-card success";
+            pStat.innerHTML = poe ? `✅ <b>OK:</b> PoE is Available.` : `✅ <b>OK:</b> No phones configured.`;
         }
 
-        if(didAutoAdd) renderCart();
+        // --- 3. ATA CHECK ---
+        let totalLines = state.metrics.analogLines + state.metrics.pagingQty + state.metrics.faxQty;
+        let aCard = document.getElementById("cardATA");
+        let aStat = document.getElementById("statATA");
+
+        if(totalLines > 0) {
+            let estPorts = Math.ceil(totalLines / 2);
+            let locs = state.metrics.e911Locs;
+            let minDevices = Math.max(estPorts, locs);
+
+            if(countATAs < minDevices) {
+                state.isATACompliant = false;
+                aCard.className = "dash-card error";
+                aStat.innerHTML = `⚠️ <b>Check Required:</b><br>${totalLines} Analog Lines / ${locs} Locs.<br>Est. Requirement: ~${minDevices} ATAs.<br>Current Count: ${countATAs}.`;
+            } else {
+                state.isATACompliant = true;
+                aCard.className = "dash-card success";
+                aStat.innerHTML = `✅ <b>OK:</b> ${totalLines} Lines covered by ${countATAs} ATAs.`;
+            }
+        } else {
+            state.isATACompliant = true;
+            aCard.className = "dash-card success";
+            aStat.innerHTML = `✅ <b>OK:</b> No Analog lines detected.`;
+        }
+
+        toggleSaveButtons();
     }
 
-    function editPowerSupply() {
-        if(!state.defaultPowerSupply) return;
-        // Find in cart
-        let idx = state.cart.findIndex(i => i.product_id === state.defaultPowerSupply.id);
-        if(idx > -1) {
-            // Highly specific: Scroll to cart? 
-            // Since there isn't a direct "Edit Qty" box in the cart table (only display), 
-            // We simulate selecting it again.
-            selectProduct(state.defaultPowerSupply.id, state.defaultPowerSupply.Product_Name);
+    function toggleSaveButtons() {
+        let isOverride = document.getElementById("chkOverride").checked;
+        let isClean = state.isPowerCompliant && state.isATACompliant;
+
+        let overrideDiv = document.getElementById("overrideSection");
+        let btnUpdate = document.getElementById("btnUpdate");
+        let btnFinish = document.getElementById("btnFinish");
+
+        if(isClean) {
+            overrideDiv.style.display = "none";
+            document.getElementById("chkOverride").checked = false; 
+            btnUpdate.disabled = false;
+            btnFinish.disabled = false;
+        } else {
+            overrideDiv.style.display = "block";
+            btnUpdate.disabled = !isOverride;
+            btnFinish.disabled = !isOverride;
         }
     }
 
-    function upsertCartItem(id, name, qty, isAuto) {
-        let existingIndex = state.cart.findIndex(i => i.product_id === id);
-        if(existingIndex > -1) {
-            state.cart[existingIndex].quantity = qty;
-            if(isAuto) state.cart[existingIndex].isAuto = true;
-        } else {
-            state.cart.push({
-                product_id: id,
-                product_name: name,
-                quantity: qty,
-                isAuto: isAuto || false
-            });
-        }
+    function getAllActiveItems() {
+        let active = [];
+        state.existingSubform.forEach(item => {
+            if(!state.deletedIds.includes(item.row_id)) {
+                active.push(item);
+            }
+        });
+        state.cart.forEach(item => active.push(item));
+        return active;
     }
 
     /* =======================================================
-       4. UI INTERACTION
+       4. UI & INTERACTION
        ======================================================= */
     
     function switchCategory(type) {
@@ -405,21 +419,14 @@
     }
 
     function showDropdown() { renderDropdown(state.masterProductList); }
-
     function filterLocalProducts() {
         let q = document.getElementById("searchBox").value.toLowerCase();
-        let filtered = state.masterProductList.filter(p => p.Product_Name.toLowerCase().includes(q));
-        renderDropdown(filtered);
+        renderDropdown(state.masterProductList.filter(p => p.Product_Name.toLowerCase().includes(q)));
     }
-
     function renderDropdown(items) {
         let html = "";
         if(items.length === 0) html = "<div class='result-item'>No matches</div>";
-        else {
-            items.forEach(p => {
-                html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name.replace(/"/g, '&quot;')}")'>${p.Product_Name}</div>`;
-            });
-        }
+        else items.forEach(p => { html += `<div class='result-item' onclick='selectProduct("${p.id}", "${p.Product_Name.replace(/"/g, '&quot;')}")'>${p.Product_Name}</div>`; });
         document.getElementById("results").innerHTML = html;
         document.getElementById("results").style.display = "block";
     }
@@ -430,124 +437,98 @@
         document.getElementById("results").style.display = "none";
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
-        document.getElementById("qtyInput").value = 1; // Default
-        
-        // Check if already in cart to pre-fill qty
-        let existing = state.cart.find(i => i.product_id === id);
-        if(existing) document.getElementById("qtyInput").value = existing.quantity;
-
+        document.getElementById("qtyInput").value = 1; 
         document.getElementById("qtyInput").focus();
     }
 
     function addToCart() {
         let qty = parseInt(document.getElementById("qtyInput").value);
         if(qty > 0) {
-            upsertCartItem(selectedItem.id, selectedItem.name, qty, false);
-            renderCart();
+            let existing = state.cart.find(i => i.product_id === selectedItem.id);
+            if(existing) existing.quantity += qty;
+            else state.cart.push({ product_id: selectedItem.id, product_name: selectedItem.name, quantity: qty, source: 'cart' });
+            
             cancelSelection();
             document.getElementById("searchBox").value = "";
+            renderInventory();
+            runComplianceCheck();
+        }
+    }
+    function cancelSelection() { document.getElementById("qtySection").style.display = "none"; selectedItem = null; }
+
+    /* =======================================================
+       5. UNIFIED INVENTORY RENDERING
+       ======================================================= */
+    function renderInventory() {
+        let tbody = document.getElementById("inventoryBody");
+        let html = "";
+        let hasItems = false;
+
+        state.existingSubform.forEach((item, index) => {
+            if(!state.deletedIds.includes(item.row_id)) {
+                hasItems = true;
+                html += `<tr>
+                    <td>${item.product_name} <span class="badge-old">Existing</span></td>
+                    <td>${item.quantity}</td>
+                    <td><button class="btn-del" onclick="deleteExisting('${item.row_id}')">🗑️ Delete</button></td>
+                </tr>`;
+            }
+        });
+
+        state.cart.forEach((item, index) => {
+            hasItems = true;
+            html += `<tr>
+                <td>${item.product_name} <span class="badge-new">New</span></td>
+                <td>${item.quantity}</td>
+                <td><button class="btn-del" onclick="removeFromCart(${index})">X Remove</button></td>
+            </tr>`;
+        });
+
+        if(!hasItems) html = "<tr><td colspan='3' style='text-align:center; color:#999; padding:20px;'>No items selected.</td></tr>";
+        tbody.innerHTML = html;
+    }
+
+    function deleteExisting(rowId) {
+        if(confirm("Mark this item for deletion?")) {
+            state.deletedIds.push(rowId);
+            renderInventory();
             runComplianceCheck();
         }
     }
 
-    function cancelSelection() {
-        document.getElementById("qtySection").style.display = "none";
-        selectedItem = null;
-    }
-
-    function renderCart() {
-        let tbody = document.getElementById("cartBody");
-        if(state.cart.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='3' style='text-align:center; color:#999;'>Cart is empty</td></tr>";
-            return;
-        }
-        let html = "";
-        state.cart.forEach((item, index) => {
-            let badge = item.isAuto ? `<span class="badge-auto">Required</span>` : `<span class="badge-new">New</span>`;
-            html += `<tr>
-                <td>${item.product_name} ${badge}</td>
-                <td>${item.quantity}</td>
-                <td><button onclick="removeFromCart(${index})" style="color:red; background:none; border:none; cursor:pointer;">X</button></td>
-            </tr>`;
-        });
-        tbody.innerHTML = html;
-    }
-
     function removeFromCart(index) {
         state.cart.splice(index, 1);
-        renderCart();
+        renderInventory();
         runComplianceCheck();
     }
 
-    function renderExistingItems() {
-        let tbody = document.getElementById("existingBody");
-        document.getElementById("loadingInv").innerText = "";
-        if(state.existingSubform.length === 0) {
-            tbody.innerHTML = "<tr><td colspan='2' style='color:#999;'>No items on Deal yet.</td></tr>";
-            return;
-        }
-        let html = "";
-        state.existingSubform.forEach(item => {
-            html += `<tr><td>${item.product_name}</td><td>${item.quantity}</td></tr>`;
-        });
-        tbody.innerHTML = html;
-    }
-
     /* =======================================================
-       5. SUBMISSION LOGIC (MERGING ENABLED)
+       6. SUBMISSION LOGIC (Handle Deletions & Merges)
        ======================================================= */
     
     function submitData(mode) {
-        if(mode === 'advance' && state.cart.length === 0 && state.existingSubform.length === 0) {
-            if(!confirm("The deal has no hardware. Are you sure you want to proceed?")) return;
-        }
-
         setLoading(true, mode);
 
         let ethVal = document.getElementById("chk_ethernet").checked ? "Yes" : null;
         let poeVal = document.getElementById("chk_poe").checked ? "Yes" : null;
 
-        // --- MERGE LOGIC ---
-        // 1. Create a map of Existing items by Product ID
-        let mergedItems = new Map();
-
-        // Load Existing
-        state.existingSubform.forEach(row => {
-            mergedItems.set(row.product_id, {
-                row_id: row.id, // Keep row ID to update existing line
-                qty: row.quantity,
-                product_id: row.product_id
-            });
-        });
-
-        // 2. Process Cart (Add to existing or Create new)
-        state.cart.forEach(item => {
-            if(mergedItems.has(item.product_id)) {
-                // UPDATE existing row
-                let existing = mergedItems.get(item.product_id);
-                existing.qty = existing.qty + parseInt(item.quantity);
-            } else {
-                // CREATE new row
-                mergedItems.set(item.product_id, {
-                    row_id: null,
-                    qty: parseInt(item.quantity),
-                    product_id: item.product_id
-                });
-            }
-        });
-
-        // 3. Build Subform Payload
         let subformData = [];
-        mergedItems.forEach(item => {
-            let rowObj = {
-                "Phone_Selection": { "id": item.product_id },
-                "Phone_Qty": item.qty
-            };
-            // If it has a row_id, it updates the existing line.
-            if(item.row_id) {
-                rowObj.id = item.row_id;
+
+        state.deletedIds.forEach(id => {
+            subformData.push({ "id": id, "_delete": null });
+        });
+
+        state.existingSubform.forEach(item => {
+            if(!state.deletedIds.includes(item.row_id)) {
+                subformData.push({ "id": item.row_id }); 
             }
-            subformData.push(rowObj);
+        });
+
+        state.cart.forEach(item => {
+            subformData.push({
+                "Phone_Selection": { "id": item.product_id },
+                "Phone_Qty": item.quantity
+            });
         });
 
         let payload = {
@@ -563,10 +544,9 @@
                 ZOHO.CRM.BLUEPRINT.proceed({ action: "save", data: {} });
             } else {
                 state.cart = []; 
-                renderCart();
                 loadDealData(); 
                 setLoading(false, mode);
-                document.getElementById("logicAlert").style.display = "none"; 
+                document.getElementById("chkOverride").checked = false;
                 alert("Deal Updated Successfully");
             }
         })
@@ -576,20 +556,16 @@
         });
     }
 
-    function enableButtons(enabled) {
-        document.getElementById("btnUpdate").disabled = !enabled;
-        document.getElementById("btnFinish").disabled = !enabled;
-    }
-
     function setLoading(isLoading, mode) {
         let btn = (mode === 'save') ? document.getElementById("btnUpdate") : document.getElementById("btnFinish");
         if(isLoading) {
             btn.innerText = "Processing...";
-            enableButtons(false);
+            document.getElementById("btnUpdate").disabled = true;
+            document.getElementById("btnFinish").disabled = true;
         } else {
             document.getElementById("btnUpdate").innerText = "Update Deal Only";
             document.getElementById("btnFinish").innerText = "Save & Finish";
-            enableButtons(true);
+            toggleSaveButtons(); 
         }
     }
 
