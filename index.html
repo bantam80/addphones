@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V3.0 (Smart Config)</title>
+    <title>Quote Kiosk - V3.5 (Merge & Logic Fix)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -15,7 +15,8 @@
         .tab-btn.active { background: #007bff; color: white; }
 
         /* -- System Messages -- */
-        .system-alert { background: #fff3cd; color: #856404; padding: 10px; border-radius: 4px; border: 1px solid #ffeeba; margin-bottom: 15px; display:none; font-size: 14px;}
+        .system-alert { background: #fff3cd; color: #856404; padding: 15px; border-radius: 4px; border: 1px solid #ffeeba; margin-bottom: 15px; display:none; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+        .alert-btn { background: #856404; color: white; border: none; padding: 5px 10px; margin-left: 10px; cursor: pointer; border-radius: 3px; font-size: 12px; }
 
         /* -- Search & Inputs -- */
         input[type="text"], input[type="number"] { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
@@ -144,8 +145,8 @@
         activeCategory: 'Phone',
         
         // System Data for Logic
-        defaultPowerSupply: null, // Will hold the product obj for "Power Supply"
-        defaultATA: null,         // Will hold the product obj for "ATA"
+        defaultPowerSupply: null, 
+        defaultATA: null,         
         
         // Deal Metrics for Logic
         metrics: {
@@ -170,30 +171,25 @@
     });
 
     ZOHO.embeddedApp.init().then(function(){
-        fetchProducts('Phone'); // Load initial list
-        fetchSystemHardware();  // Pre-fetch Power Supply & ATA for automation
+        fetchProducts('Phone'); 
+        fetchSystemHardware();  
     });
 
     /* =======================================================
        2. DATA LOADING
        ======================================================= */
     
-    // Fetch "System" products (Power Supply & Default ATA) to have ready for auto-add
     function fetchSystemHardware() {
         ZOHO.CRM.API.getAllRecords({ Entity: "Products", sort_order: "asc", per_page: 200 })
         .then(function(data){
             if(data.data){
-                // Find First Power Supply
                 state.defaultPowerSupply = data.data.find(p => p.Hardware_Type === "Power Supply");
-                // Find First ATA (fallback if user doesn't pick one)
                 state.defaultATA = data.data.find(p => p.Category === "ATA");
-                
-                console.log("System Hardware Loaded:", state.defaultPowerSupply, state.defaultATA);
+                console.log("System Hardware Loaded");
             }
         });
     }
 
-    // Load Deal Details & Metrics
     function loadDealData() {
         document.getElementById("loadingInv").innerText = "(Loading...)";
         
@@ -201,37 +197,28 @@
         .then(function(response){
             let data = response.data[0];
             
-            // Checkboxes
             document.getElementById("chk_ethernet").checked = (data.Ethernet_Cabling === "Yes");
             document.getElementById("chk_poe").checked = (data.PoE_Available === "Yes");
 
-            // Logic Metrics (Ensure integers)
             state.metrics.analogLines = parseInt(data.Analog_Line_Count) || 0;
             state.metrics.pagingQty = parseInt(data.POTS_for_Paging_Qty) || 0;
             state.metrics.faxQty = parseInt(data.T_38_Fax) || 0;
             state.metrics.e911Locs = parseInt(data.E911_Locations) || 1; 
 
-            // Existing Subform Items
             state.existingSubform = [];
             if(data.Phone_Hardware) {
                 state.existingSubform = data.Phone_Hardware.map(row => ({
                     id: row.id, 
                     product_name: row.Phone_Selection.name,
                     product_id: row.Phone_Selection.id,
-                    quantity: parseInt(row.Phone_Qty) || 0,
-                    // We need to know if existing items are Phones to calc Power needs
-                    // Ideally we'd query product details, but for now we assume they are valid phones
-                    isPhone: true 
+                    quantity: parseInt(row.Phone_Qty) || 0
                 }));
             }
             renderExistingItems();
-            
-            // Run initial check (e.g. if Analog lines exist but no ATA)
             runComplianceCheck(); 
         });
     }
 
-    // Fetch Products based on Tab
     function fetchProducts(type) {
         state.activeCategory = type;
         document.getElementById("searchBox").placeholder = "Loading " + type + "...";
@@ -240,17 +227,11 @@
         state.masterProductList = [];
         document.getElementById("results").innerHTML = "";
 
-        // STRATEGY:
-        // Phones = Criteria Search
-        // ATA = Search by Category
-        // Other = GetAll + Filter
-
         if(type === 'Phone') {
             ZOHO.CRM.API.searchRecord({ Entity: "Products", Type: "criteria", Query: "((Hardware_Type:equals:NA))" })
             .then(processResults).catch(handleErr);
         } 
         else if (type === 'ATA') {
-             // ATAs are Category based, Hardware Type NA
              ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
             .then(function(data){
                 if(data.data) {
@@ -260,7 +241,6 @@
             });
         }
         else {
-            // Other Hardware (Exclude NA type, exclude ATA category)
             ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
             .then(function(data){
                 if(data.data) {
@@ -273,7 +253,6 @@
 
     function processResults(data) {
         if(data.data){
-            // If Phone, ensure Category has 'phone'
             if(state.activeCategory === 'Phone') {
                 state.masterProductList = data.data.filter(p => p.Category && p.Category.toLowerCase().includes("phone"));
             } else {
@@ -297,49 +276,53 @@
     }
 
     /* =======================================================
-       3. COMPLIANCE ENGINE (The Logic Brain)
+       3. COMPLIANCE ENGINE (Refined)
        ======================================================= */
     
     function runComplianceCheck() {
         let alerts = [];
         let didAutoAdd = false;
 
+        // --- Helper: Count Total Qty of a specific product type in Cart + Existing ---
+        function countHardware(filterFn) {
+            let inCart = state.cart.reduce((sum, item) => filterFn(item.product_name) ? sum + parseInt(item.quantity) : sum, 0);
+            let inExisting = state.existingSubform.reduce((sum, item) => filterFn(item.product_name) ? sum + parseInt(item.quantity) : sum, 0);
+            return { total: inCart + inExisting, cartVal: inCart, existVal: inExisting };
+        }
+
         // --- A. POWER SUPPLY LOGIC ---
-        // 1. Calculate Total Phones (Cart + Existing)
-        // We assume Cart items in 'Phone' tab are phones. 
-        // Note: We need a way to know if a cart item is a phone. 
-        // For simplicity, we check if the name DOES NOT contain "Power" or "ATA"
+        // Definition of a phone: Not Power Supply, Not ATA.
+        let isPhone = (name) => {
+            let n = name.toLowerCase();
+            return !n.includes("power") && !n.includes("ata"); 
+        };
         
-        let cartPhones = state.cart.reduce((sum, item) => {
-            let isPower = item.product_name.toLowerCase().includes("power");
-            let isATA = item.product_name.toLowerCase().includes("ata"); // Rough check
-            return (!isPower && !isATA) ? sum + parseInt(item.quantity) : sum;
-        }, 0);
-
-        let existingPhones = state.existingSubform.reduce((sum, item) => sum + item.quantity, 0);
-        let totalPhones = cartPhones + existingPhones;
-
-        // 2. Check PoE Status
+        let phoneCounts = countHardware(isPhone);
         let poeAvailable = document.getElementById("chk_poe").checked;
-        
-        if(!poeAvailable && totalPhones > 0) {
-            // WE NEED POWER SUPPLIES
+
+        if(!poeAvailable && phoneCounts.total > 0) {
             if(state.defaultPowerSupply) {
                 let psuName = state.defaultPowerSupply.Product_Name;
                 let psuId = state.defaultPowerSupply.id;
-
-                // Check how many we have in cart
-                let cartPSU = state.cart.find(i => i.product_id === psuId);
-                let currentPSUQty = cartPSU ? parseInt(cartPSU.quantity) : 0;
-
-                if(currentPSUQty < totalPhones) {
-                    // FORCE ADD/UPDATE
-                    upsertCartItem(psuId, psuName, totalPhones, true); // true = isAuto
-                    alerts.push(`⚠️ PoE Unchecked: Added ${totalPhones} Power Supplies.`);
+                
+                // Count current PSUs
+                let psuCounts = countHardware((name) => name.includes(psuName) || name.toLowerCase().includes("power supply"));
+                
+                if(psuCounts.total < phoneCounts.total) {
+                    // Logic: We only add to Cart what is missing.
+                    let deficit = phoneCounts.total - psuCounts.total;
+                    
+                    // Add deficit to cart
+                    let currentCartPSU = state.cart.find(i => i.product_id === psuId);
+                    let newCartQty = (currentCartPSU ? parseInt(currentCartPSU.quantity) : 0) + deficit;
+                    
+                    upsertCartItem(psuId, psuName, newCartQty, true);
                     didAutoAdd = true;
+                    
+                    alerts.push(`⚠️ <strong>Power Supply Check:</strong>\n${phoneCounts.total} phones in quote. (Existing: ${phoneCounts.existVal}, Cart: ${phoneCounts.cartVal}).\nEnforced ${phoneCounts.total} Power Cords. <button class="alert-btn" onclick="editPowerSupply()">Edit</button>`);
+                } else {
+                     alerts.push(`✅ <strong>Power Supply Check:</strong>\n${phoneCounts.total} phones require power. ${psuCounts.total} Power Cords present.`);
                 }
-            } else {
-                alerts.push("⚠️ Error: 'Power Supply' product not found in System.");
             }
         }
 
@@ -347,56 +330,52 @@
         let totalLines = state.metrics.analogLines + state.metrics.pagingQty + state.metrics.faxQty;
         
         if(totalLines > 0) {
-            // 1. Calculate Needs
-            // Rule 1: Capacity (2 ports per ATA)
+            // Rule: Max of (Ports Needed) vs (Locations Needed)
             let portNeeded = Math.ceil(totalLines / 2);
-            
-            // Rule 2: Locations (Cannot split 1 ATA across 2 addresses)
-            // If E911 > 1, ensure at least 1 ATA per location involved (capped by line count)
-            // We assume worst case: lines are spread evenly or max distribution
             let locNeeded = Math.min(totalLines, state.metrics.e911Locs);
-            
             let requiredATAs = Math.max(portNeeded, locNeeded);
 
-            // 2. Check Cart for ANY ATA
-            // We sum up quantity of ALL items that are likely ATAs (Category ATA)
-            // Since we don't store Category in Cart, we cross-reference or assume Name check?
-            // BETTER: We rely on the user adding ATAs. If total count is low, we force the DEFAULT ATA.
+            // Count ATAs in System (Cart + Existing)
+            let ataCounts = countHardware((name) => name.toUpperCase().includes("ATA"));
             
-            let currentATAQty = state.cart.reduce((sum, item) => {
-                // Determine if item is ATA. 
-                // Weak check: Name contains ATA or it matches defaultATA ID
-                if(item.product_name.toUpperCase().includes("ATA")) return sum + parseInt(item.quantity);
-                return sum;
-            }, 0);
-
-            if(currentATAQty < requiredATAs) {
+            if(ataCounts.total < requiredATAs) {
                 if(state.defaultATA) {
-                    let deficit = requiredATAs - currentATAQty;
-                    // We only add the Default ATA to bridge the gap
-                    // Find if default ATA is already in cart
-                    let cartDefault = state.cart.find(i => i.product_id === state.defaultATA.id);
-                    let newQty = (cartDefault ? parseInt(cartDefault.quantity) : 0) + deficit;
+                    let deficit = requiredATAs - ataCounts.total;
+                    let currentCartATA = state.cart.find(i => i.product_id === state.defaultATA.id);
+                    let newCartQty = (currentCartATA ? parseInt(currentCartATA.quantity) : 0) + deficit;
 
-                    upsertCartItem(state.defaultATA.id, state.defaultATA.Product_Name, newQty, true);
-                    alerts.push(`⚠️ Analog/Fax Lines Detected: Enforced ${requiredATAs} ATA(s).`);
+                    upsertCartItem(state.defaultATA.id, state.defaultATA.Product_Name, newCartQty, true);
                     didAutoAdd = true;
-                } else {
-                    alerts.push("⚠️ Error: No 'ATA' category product found in System.");
+
+                    alerts.push(`⚠️ <strong>ATA Logic:</strong>\nCustomer has ${totalLines} analog ports & ${state.metrics.e911Locs} Locations.\nCalculated Requirement: ${requiredATAs} Devices.\n(Existing: ${ataCounts.existVal}, Auto-Added: ${deficit}).`);
                 }
+            } else {
+                 alerts.push(`✅ <strong>ATA Logic:</strong>\nRequirement met. ${totalLines} Lines / ${state.metrics.e911Locs} Locs. ${ataCounts.total} ATAs configured.`);
             }
         }
 
-        // Display Alerts
+        // Render Alerts
         let alertBox = document.getElementById("logicAlert");
         if(alerts.length > 0) {
-            alertBox.innerText = alerts.join("\n");
+            alertBox.innerHTML = alerts.join("<br><hr style='margin:10px 0; border:0; border-top:1px solid #e3c081;'>");
             alertBox.style.display = "block";
         } else {
             alertBox.style.display = "none";
         }
 
         if(didAutoAdd) renderCart();
+    }
+
+    function editPowerSupply() {
+        if(!state.defaultPowerSupply) return;
+        // Find in cart
+        let idx = state.cart.findIndex(i => i.product_id === state.defaultPowerSupply.id);
+        if(idx > -1) {
+            // Highly specific: Scroll to cart? 
+            // Since there isn't a direct "Edit Qty" box in the cart table (only display), 
+            // We simulate selecting it again.
+            selectProduct(state.defaultPowerSupply.id, state.defaultPowerSupply.Product_Name);
+        }
     }
 
     function upsertCartItem(id, name, qty, isAuto) {
@@ -451,6 +430,12 @@
         document.getElementById("results").style.display = "none";
         document.getElementById("qtySection").style.display = "block";
         document.getElementById("selectedName").innerText = name;
+        document.getElementById("qtyInput").value = 1; // Default
+        
+        // Check if already in cart to pre-fill qty
+        let existing = state.cart.find(i => i.product_id === id);
+        if(existing) document.getElementById("qtyInput").value = existing.quantity;
+
         document.getElementById("qtyInput").focus();
     }
 
@@ -461,8 +446,6 @@
             renderCart();
             cancelSelection();
             document.getElementById("searchBox").value = "";
-            
-            // RUN RULES AFTER ADD
             runComplianceCheck();
         }
     }
@@ -493,7 +476,6 @@
     function removeFromCart(index) {
         state.cart.splice(index, 1);
         renderCart();
-        // RUN RULES AFTER REMOVE (If they remove Power Supply, it might immediately add back!)
         runComplianceCheck();
     }
 
@@ -512,7 +494,7 @@
     }
 
     /* =======================================================
-       5. SUBMISSION LOGIC
+       5. SUBMISSION LOGIC (MERGING ENABLED)
        ======================================================= */
     
     function submitData(mode) {
@@ -525,19 +507,47 @@
         let ethVal = document.getElementById("chk_ethernet").checked ? "Yes" : null;
         let poeVal = document.getElementById("chk_poe").checked ? "Yes" : null;
 
-        let subformData = [];
-        
-        // Preserve Existing
+        // --- MERGE LOGIC ---
+        // 1. Create a map of Existing items by Product ID
+        let mergedItems = new Map();
+
+        // Load Existing
         state.existingSubform.forEach(row => {
-            subformData.push({ "id": row.id.toString() });
+            mergedItems.set(row.product_id, {
+                row_id: row.id, // Keep row ID to update existing line
+                qty: row.quantity,
+                product_id: row.product_id
+            });
         });
 
-        // Add New
+        // 2. Process Cart (Add to existing or Create new)
         state.cart.forEach(item => {
-            subformData.push({
+            if(mergedItems.has(item.product_id)) {
+                // UPDATE existing row
+                let existing = mergedItems.get(item.product_id);
+                existing.qty = existing.qty + parseInt(item.quantity);
+            } else {
+                // CREATE new row
+                mergedItems.set(item.product_id, {
+                    row_id: null,
+                    qty: parseInt(item.quantity),
+                    product_id: item.product_id
+                });
+            }
+        });
+
+        // 3. Build Subform Payload
+        let subformData = [];
+        mergedItems.forEach(item => {
+            let rowObj = {
                 "Phone_Selection": { "id": item.product_id },
-                "Phone_Qty": item.quantity
-            });
+                "Phone_Qty": item.qty
+            };
+            // If it has a row_id, it updates the existing line.
+            if(item.row_id) {
+                rowObj.id = item.row_id;
+            }
+            subformData.push(rowObj);
         });
 
         let payload = {
@@ -556,7 +566,7 @@
                 renderCart();
                 loadDealData(); 
                 setLoading(false, mode);
-                document.getElementById("logicAlert").style.display = "none"; // Clear alerts
+                document.getElementById("logicAlert").style.display = "none"; 
                 alert("Deal Updated Successfully");
             }
         })
