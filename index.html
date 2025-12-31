@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Quote Kiosk - V4.1 (Strict Type Logic)</title>
+    <title>Quote Kiosk - V4.2 (Edit + Logic Fix)</title>
     <script src="https://live.zwidgets.com/js-sdk/1.2/ZohoEmbededAppSDK.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f5f7; }
@@ -44,9 +44,14 @@
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th { background: #f8f9fa; color: #666; font-size: 13px; text-transform: uppercase; padding: 8px; text-align: left; border-bottom: 2px solid #ddd; }
         td { padding: 8px; border-bottom: 1px solid #eee; font-size: 14px; vertical-align: middle; }
-        .btn-del { color: #dc3545; background: none; border: 1px solid #dc3545; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+        
+        /* -- Buttons -- */
+        .btn-del { color: #dc3545; background: none; border: 1px solid #dc3545; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; margin-left:5px;}
         .btn-del:hover { background: #dc3545; color: white; }
         
+        .btn-edit { color: #007bff; background: none; border: 1px solid #007bff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; }
+        .btn-edit:hover { background: #007bff; color: white; }
+
         /* -- Requirements -- */
         .questions-box { background: #e9ecef; border: 1px solid #ced4da; padding: 10px; border-radius: 5px; margin: 20px 0; display:flex; gap: 20px; align-items: center;}
         .questions-box label { cursor: pointer; font-weight: 500; }
@@ -116,7 +121,7 @@
             <tr>
                 <th>Product</th>
                 <th width="80">Qty</th>
-                <th width="80">Action</th>
+                <th width="140">Action</th>
             </tr>
         </thead>
         <tbody id="inventoryBody">
@@ -148,7 +153,6 @@
     let state = {
         dealId: null,
         
-        // Lists
         existingSubform: [], 
         cart: [], 
         deletedIds: [], 
@@ -161,11 +165,9 @@
         validATAIDs: [],
         referenceLoaded: false,
         
-        // Compliance Flags
         isPowerCompliant: true,
         isATACompliant: true,
 
-        // Metrics
         metrics: {
             analogLines: 0,
             pagingQty: 0,
@@ -192,29 +194,35 @@
     });
 
     /* =======================================================
-       2. DATA LOADING
+       2. DATA LOADING & STRICT ID FETCHING
        ======================================================= */
     
-    // FETCH WHITELISTS (Strict Logic Source)
+    // FETCH WHITELISTS (Targeted Searches to avoid 200 record limit)
     function fetchReferenceData() {
-        // Fetch ALL products (limit 200) to find official Power Cords & ATAs
-        ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
-        .then(function(data){
-            if(data.data) {
-                data.data.forEach(p => {
-                    // STRICT CHECK 1: Power Cords
-                    if(p.Hardware_Type === "Power Cords") {
+        let p1 = ZOHO.CRM.API.searchRecord({ Entity: "Products", Type: "criteria", Query: "((Hardware_Type:equals:Power Cords))" });
+        let p2 = ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 }); // Still fetch 200 for generic ATAs/Products check
+
+        Promise.all([p1, p2]).then(values => {
+            // 1. Process STRICT Power Cords
+            if(values[0] && values[0].data) {
+                values[0].data.forEach(p => state.validPowerIDs.push(p.id));
+            }
+
+            // 2. Process ATAs (from broader list, or we could add another search for category)
+            // Note: Search API doesn't support Category well, so we rely on getAll + filtering
+            if(values[1] && values[1].data) {
+                values[1].data.forEach(p => {
+                    if(p.Category === "ATA") state.validATAIDs.push(p.id);
+                    // Fallback: If getAll found power cords the search missed (unlikely), add them
+                    if(p.Hardware_Type === "Power Cords" && !state.validPowerIDs.includes(p.id)) {
                         state.validPowerIDs.push(p.id);
                     }
-                    // STRICT CHECK 2: ATAs
-                    if(p.Category === "ATA") {
-                        state.validATAIDs.push(p.id);
-                    }
                 });
-                state.referenceLoaded = true;
-                console.log("Reference Data Loaded. Cords:", state.validPowerIDs.length, "ATAs:", state.validATAIDs.length);
-                runComplianceCheck(); // Re-run in case Deal loaded first
             }
+
+            state.referenceLoaded = true;
+            console.log("Whitelist Loaded. PowerIDs:", state.validPowerIDs.length, "ATAIDs:", state.validATAIDs.length);
+            runComplianceCheck();
         });
     }
 
@@ -261,7 +269,6 @@
             .then(processResults).catch(handleErr);
         } 
         else if (type === 'ATA') {
-             // We can use the reference list if fully loaded, but Search is safer for partial loads
              ZOHO.CRM.API.getAllRecords({ Entity: "Products", per_page: 200 })
             .then(function(data){
                 if(data.data) {
@@ -309,7 +316,6 @@
 
         let allItems = getAllActiveItems(); 
         
-        // --- 1. CLASSIFY ITEMS BY ID ---
         let countPhones = 0; 
         let countCords = 0;
         let countATAs = 0;
@@ -322,12 +328,12 @@
                 countATAs += item.quantity;
             }
             else {
-                // Assumption: If it's not a known Power Cord or ATA, it's a Phone/Device
+                // If not in Power ID list AND not in ATA ID list, assume it's a Phone
                 countPhones += item.quantity;
             }
         });
 
-        // --- 2. POWER CHECK ---
+        // --- POWER CHECK ---
         let poe = document.getElementById("chk_poe").checked;
         let pCard = document.getElementById("cardPower");
         let pStat = document.getElementById("statPower");
@@ -348,7 +354,7 @@
             pStat.innerHTML = poe ? `✅ <b>OK:</b> PoE is Available.` : `✅ <b>OK:</b> No phones configured.`;
         }
 
-        // --- 3. ATA CHECK ---
+        // --- ATA CHECK ---
         let totalLines = state.metrics.analogLines + state.metrics.pagingQty + state.metrics.faxQty;
         let aCard = document.getElementById("cardATA");
         let aStat = document.getElementById("statATA");
@@ -399,9 +405,7 @@
     function getAllActiveItems() {
         let active = [];
         state.existingSubform.forEach(item => {
-            if(!state.deletedIds.includes(item.row_id)) {
-                active.push(item);
-            }
+            if(!state.deletedIds.includes(item.row_id)) active.push(item);
         });
         state.cart.forEach(item => active.push(item));
         return active;
@@ -457,39 +461,71 @@
     function cancelSelection() { document.getElementById("qtySection").style.display = "none"; selectedItem = null; }
 
     /* =======================================================
-       5. UNIFIED INVENTORY RENDERING
+       5. UNIFIED INVENTORY RENDERING (Edit Enabled)
        ======================================================= */
     function renderInventory() {
         let tbody = document.getElementById("inventoryBody");
         let html = "";
         let hasItems = false;
 
+        // Helper to render row
+        function makeRow(name, qty, type, idxOrId, isExisting) {
+            let badge = isExisting ? `<span class="badge-old">Existing</span>` : `<span class="badge-new">New</span>`;
+            
+            // Onclick params
+            let editCall = isExisting ? `editItem('${idxOrId}', true)` : `editItem(${idxOrId}, false)`;
+            let delCall = isExisting ? `deleteExisting('${idxOrId}')` : `removeFromCart(${idxOrId})`;
+            let delLabel = isExisting ? `🗑️` : `X`;
+
+            return `<tr>
+                <td>${name} ${badge}</td>
+                <td>${qty}</td>
+                <td>
+                    <button class="btn-edit" onclick="${editCall}">✎ Edit</button>
+                    <button class="btn-del" onclick="${delCall}">${delLabel}</button>
+                </td>
+            </tr>`;
+        }
+
+        // Render Existing
         state.existingSubform.forEach((item, index) => {
             if(!state.deletedIds.includes(item.row_id)) {
                 hasItems = true;
-                html += `<tr>
-                    <td>${item.product_name} <span class="badge-old">Existing</span></td>
-                    <td>${item.quantity}</td>
-                    <td><button class="btn-del" onclick="deleteExisting('${item.row_id}')">🗑️ Delete</button></td>
-                </tr>`;
+                html += makeRow(item.product_name, item.quantity, 'exist', item.row_id, true);
             }
         });
 
+        // Render Cart
         state.cart.forEach((item, index) => {
             hasItems = true;
-            html += `<tr>
-                <td>${item.product_name} <span class="badge-new">New</span></td>
-                <td>${item.quantity}</td>
-                <td><button class="btn-del" onclick="removeFromCart(${index})">X Remove</button></td>
-            </tr>`;
+            html += makeRow(item.product_name, item.quantity, 'cart', index, false);
         });
 
         if(!hasItems) html = "<tr><td colspan='3' style='text-align:center; color:#999; padding:20px;'>No items selected.</td></tr>";
         tbody.innerHTML = html;
     }
 
+    function editItem(idOrIndex, isExisting) {
+        let item = null;
+        if(isExisting) {
+            item = state.existingSubform.find(i => i.row_id === idOrIndex);
+        } else {
+            item = state.cart[idOrIndex];
+        }
+
+        if(item) {
+            let newQty = prompt("Enter new quantity for " + item.product_name + ":", item.quantity);
+            let pQty = parseInt(newQty);
+            if(pQty && pQty > 0) {
+                item.quantity = pQty;
+                renderInventory();
+                runComplianceCheck();
+            }
+        }
+    }
+
     function deleteExisting(rowId) {
-        if(confirm("Mark this item for deletion?")) {
+        if(confirm("Delete this item?")) {
             state.deletedIds.push(rowId);
             renderInventory();
             runComplianceCheck();
@@ -503,7 +539,7 @@
     }
 
     /* =======================================================
-       6. SUBMISSION LOGIC (Handle Deletions & Merges)
+       6. SUBMISSION LOGIC (Updated for Edits)
        ======================================================= */
     
     function submitData(mode) {
@@ -514,16 +550,23 @@
 
         let subformData = [];
 
+        // 1. Deletions
         state.deletedIds.forEach(id => {
             subformData.push({ "id": id, "_delete": null });
         });
 
+        // 2. Existing Updates (Send ID + QTY)
         state.existingSubform.forEach(item => {
             if(!state.deletedIds.includes(item.row_id)) {
-                subformData.push({ "id": item.row_id }); 
+                // IMPORTANT: We send QTY now in case it was edited
+                subformData.push({ 
+                    "id": item.row_id,
+                    "Phone_Qty": item.quantity 
+                }); 
             }
         });
 
+        // 3. New Cart Items
         state.cart.forEach(item => {
             subformData.push({
                 "Phone_Selection": { "id": item.product_id },
